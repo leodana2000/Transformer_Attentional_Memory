@@ -3,38 +3,36 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 
-
+n_gram = 3
 N = 5
 d = 2
-max_seq_len = 21
-assert max_seq_len % 3 == 0
+max_seq_len = n_gram*7
+assert max_seq_len % n_gram == 0
 
 lamb = 1.5
-pi = t.softmax(lamb*t.randn(N**3), dim=0)
-cat = t.distributions.Categorical(pi)
+pi = t.softmax(lamb*t.randn(N**n_gram), dim=0)
 
 
-def best_loss(pi, N):
-    pi = t.reshape(pi, (N, N, N))
-    
-    pi1 = pi.sum((1,2), keepdim=True)
-    pi2 = pi.sum(2, keepdim=True)
-    pi3 = pi
+def best_loss(pi: t.Tensor, N: int, n_gram: int):
+    pi_1 = t.reshape(pi, (N,)*n_gram)
 
-    entropy1 = (pi1*t.log(pi1)).sum()
-    entropy2 = (pi2*t.log(pi2/pi1)).sum()
-    entropy3 = (pi3*t.log(pi3/pi2)).sum()
+    entropy = 0
+    for _ in range(n_gram):
+        pi_2 = pi_1.squeeze()
+        pi_1 = pi_2.sum(-1, keepdim=True)
+        entropy -= (pi_2*t.log(pi_2/pi_1)).sum()
 
-    return -(entropy1 + entropy2 + entropy3)/3
+    return entropy/n_gram
 
 
 class Transformer(t.nn.Module):
-    def __init__(self, d, N, nb_layer, max_seq_len, pi):
+    def __init__(self, d: int, N: int, nb_layer: int, max_seq_len: int, n_gram: int, pi: t.Tensor):
         self.d = d
         self.N = N
         self.nb_layer = nb_layer
         self.max_seq_len = max_seq_len
         self.pi = pi
+        self.n_gram = n_gram
 
         super().__init__()
 
@@ -43,7 +41,7 @@ class Transformer(t.nn.Module):
         self.seq = t.nn.Sequential(*[t.nn.MultiheadAttention(d*N**2, N**2) for _ in range(nb_layer)])
         self.unemb = t.nn.Linear(d, N, bias=False)
 
-    def forward(self, x):
+    def forward(self, x: t.Tensor):
         assert x.shape[1] <= self.max_seq_len
         vect = self.word_emb.weight[x] + self.pos_emb.weight[:x.shape[1]].unsqueeze(0)
 
@@ -61,8 +59,9 @@ class Transformer(t.nn.Module):
     
 
 
-def generate_data(batch_size, num_batch, max_seq_len, N, cat=cat):
+def generate_data(batch_size: int, num_batch: int, max_seq_len: int, N: int, pi: t.Tensor):
     
+    cat = t.distributions.Categorical(pi)
     tokens = cat.sample((batch_size*num_batch, max_seq_len//3))
     t1 = tokens%N
     t2 = (tokens//N)%N
@@ -80,8 +79,8 @@ def generate_data(batch_size, num_batch, max_seq_len, N, cat=cat):
     return dataloader
 
 
-def CrossEntropy(model, input, proba, pi):
-    pi = t.reshape(pi, (model.N, model.N, model.N))
+def CrossEntropy(model: Transformer, input: t.Tensor, proba: t.Tensor):
+    pi = t.reshape(model.pi, (model.N,)*model.n_gram)
     nb_elements = proba.shape[0]*proba.shape[1]
 
     pi1 = pi.sum((1,2), keepdim=True)
@@ -103,11 +102,11 @@ def CrossEntropy(model, input, proba, pi):
 
 
 
-def train(model, lr=1e-3, epochs=5, batch_size=2**9, num_batch=200, train_pi=False):
+def train(model: Transformer, lr=1e-4, epochs=5, batch_size=2**8, num_batch=200, train_pi=False):
     optimizer = t.optim.Adam(model.parameters(), lr=lr)
 
-    dataloader = generate_data(batch_size, num_batch, model.max_seq_len, model.N)
-    b_loss = best_loss(model.pi, model.N)
+    dataloader = generate_data(batch_size, num_batch, model.max_seq_len, model.N, model.pi)
+    b_loss = best_loss(model.pi, model.N, model.n_gram)
 
     Loss = []
     th_Loss = []
@@ -122,11 +121,11 @@ def train(model, lr=1e-3, epochs=5, batch_size=2**9, num_batch=200, train_pi=Fal
             next_token_proba[:, next_token] += 1
 
             if train_pi:
-                loss = CrossEntropy(model, batch[:, :-1], model_proba, model.pi)
+                loss = CrossEntropy(model, batch[:, :-1], model_proba)
             else:
                 loss = -(t.log(model_proba)*next_token_proba).sum(-1).mean()
                 
-                th_loss = CrossEntropy(model, batch[:, :-1], model_proba, model.pi)
+                th_loss = CrossEntropy(model, batch[:, :-1], model_proba)
                 th_Loss.append((th_loss/b_loss-1).item())
             loss.backward()
             optimizer.step()
@@ -137,12 +136,12 @@ def train(model, lr=1e-3, epochs=5, batch_size=2**9, num_batch=200, train_pi=Fal
     return {'Loss': Loss, 'th_Loss': th_Loss}
 
 
-model = Transformer(d, N, 1, max_seq_len, pi)
+model = Transformer(d, N, 1, max_seq_len, n_gram, pi)
 dict = train(model, train_pi=True)
 
 plt.plot(dict['Loss'], label='dist pred')
 
-model = Transformer(d, N, 1, max_seq_len, pi)
+model = Transformer(d, N, 1, max_seq_len, n_gram, pi)
 dict = train(model)
 
 plt.plot(dict['Loss'], label='next token pred')
