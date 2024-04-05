@@ -12,12 +12,11 @@ N = 100
 d = 20
 
 #bigram distributions
-lamb_z = 1
-pi_z = t.softmax(lamb_z*t.randn((N)), dim=-1)
-cat_pi_z = t.distributions.Categorical(pi_z)
 
-lamb_k = 2
-pi_k = t.softmax(lamb_k*t.randn((N,N)), dim=-1)
+l = 1
+pi_z = t.softmax(l*t.randn((N)), dim=-1)
+cat_pi_z = t.distributions.Categorical(pi_z)
+pi_k = t.softmax(l*t.randn((N,N)), dim=-1)
 
 
 unif = t.softmax(t.zeros_like(pi_z), dim=-1)
@@ -48,29 +47,24 @@ class AE_bigram(t.nn.Module):
     def Q_bound(self, pi_k, pi_z):
         x = t.arange(0, self.N, 1)
         with t.no_grad():
+            C_b = C(pi_k)
+
             logits = self(x)
             Z = logits - t.log(pi_k)
-            Z -= (Z*pi_k).sum(-1, keepdim=True)
+            Z -= t.max(Z)
 
-            bound = (pi_z.unsqueeze(-1)*pi_k*(Z**2)).sum()/2
+            pos = (Z > 0).to(t.float)
+            neg = pos-1
+
+            bound = (pi_z*(pos*C_b*Z**2/2 + pi_k*neg*Z).sum()).sum()
             return bound
-        
-    def SVD_bound(self, pi_k, pi_z):
-        pi_inf = t.max(pi_k*(pi_z.unsqueeze(-1)))
-        u, s, v = t.linalg.svd(t.log(pi_k) - (t.log(pi_k)*pi_k).sum(-1, keepdim=True))
-        s[:self.d] = 0
-        bound = (s**2).sum()*pi_inf
-        return bound
-    
-    def SVD_bound_W(self, pi_k, pi_z):
-        pi_inf = t.max(pi_k*(pi_z.unsqueeze(-1)))
-        W_E = t.randn_like(self.W_E.weight)
-        W_U = t.randn_like(self.W_U.weight)
-        center_log = t.log(pi_k) - (t.log(pi_k)*pi_k).sum(-1, keepdim=True)
-        small_log = W_U.pinverse()@center_log@(W_E.pinverse().T)
-        bound = (small_log**2).sum()*pi_inf*(self.N**2-self.d**2)
-        return bound
 
+
+def C(b):
+    B = (1-2*b-2*t.log((1-b)/(b + 1e-6) + 1e-6))/(2*b + 1e-6)
+    D_b = B+t.sqrt(B**2+(1-b)/b)
+    C_b = (D_b)/((1+D_b)**2)
+    return C_b
 
 
 def train(model, lr=1e-4, epochs=15, batch_size: int | str = 2**10, num_batch=1000, compute_approx=False):
@@ -143,16 +137,12 @@ def is_W_UW_U_Id(model: AE_bigram):
     return t.max(t.abs(pseudo_inv-t.eye(model.N))).item()
 
 
-model1 = AE_bigram(N, d, train_U=False)
-dict1 = train(model1, batch_size="opt", compute_approx=True, epochs=10)
 
-model2 = AE_bigram(N, d, train_U=True)
-dict2 = train(model2, batch_size="opt", compute_approx=True, epochs=10)
+model = AE_bigram(N, d, train_U=True)
+dict = train(model, batch_size="opt", compute_approx=True, epochs=10)
 
-plt.plot(dict1['Div'], label="KL-div W_E")
-plt.plot(dict1['Q_bound'], label="bound for W_E")
-plt.plot(dict2['Div'], label="KL-div W_E and W_U")
-plt.plot(dict2['Q_bound'], label="bound for W_E and W_U")
+plt.plot(dict['Div'], label=f"div {l}")
+plt.plot(dict['Q_bound'], label=f"bound {l}")
 plt.title("Learning comparison")
 plt.xlabel("epochs")
 plt.legend()

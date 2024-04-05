@@ -5,18 +5,19 @@ from tqdm import tqdm
 from typing import Dict
 import pandas as pd
 from time import time
+from torch.utils.data import DataLoader, Dataset
 
-n_gram = 3
 N = 100
-d = 12
-h = 10*d
-nb_layers = 3
-nb_head = 4
+d = 10
+h = 100
+nb_layers = 1
+nb_head = 1
+n_gram = 3
 max_seq_len = n_gram
 assert max_seq_len >= n_gram
 assert n_gram == 3
 
-lamb = 5.
+lamb = 2.
 t.manual_seed(0)
 pi = t.softmax(lamb*t.randn(N**n_gram), dim=0)
 
@@ -69,15 +70,51 @@ class Transformer(t.nn.Module):
         res = self.word_emb.weight[x]
         pos = self.pos_emb.weight[:x.shape[1]].unsqueeze(0)
         for para_attn, mlp in zip(self.attn_seq, self.mlp_seq):
-            norm_res = self.layer_norm(res) #we add the positional embedding at each layer
+            norm_res = self.layer_norm(res) #we add the positional embedding at each layer to make it more efficient
             para_res = 0.
             for attn in para_attn: #if there is parallel attention, each mechanism is computed in parallel and then added in the stream
                 para_res += attn(norm_res+pos, norm_res+pos, norm_res+pos, attn_mask=attn_mask)[0]
             res = mlp(norm_res) + res + para_res #we also compute mlp in parallel of attention
             
-        logits = self.unemb(res) #no layer-norm so the transformer can modulate its confidence
+        logits = self.unemb(res) #no layer-norm at the end, we want modular temperature
         return logits
     
+
+"""def generate_data(batch_size: int, num_batch: int, params: Dict): #doesn't work for some reason ???
+    "Generate data using a 2 state markov chain."
+    max_seq_len=params['max_seq_len']
+    N=params['N']
+    n_gram=params['n_gram']
+    pi: t.Tensor = params['pi']
+    assert max_seq_len >= n_gram
+    assert n_gram == 3 #works only for n_grams
+
+    pi = t.reshape(pi, (N,)*n_gram)
+    pi_1 = pi.sum((1, 2))
+    cat_1 = t.distributions.Categorical(pi_1)
+    pi_2 = pi.sum((2))
+    cat_2 = t.distributions.Categorical(pi_2)
+    pi_3 = pi
+    cat_3 = t.distributions.Categorical(pi_3)
+
+    t1 = cat_1.sample((batch_size*num_batch,))
+    t2 = cat_2.sample((1,))[:, t1].squeeze()
+
+    t3 = cat_3.sample((max_seq_len-2,))
+    token_list = [t1.unsqueeze(-1), t2.unsqueeze(-1)]
+    for i in range(0, max_seq_len-2):
+        token_list.append(t3[i, token_list[-1], token_list[-2]])
+
+    tokens = t.cat(token_list, dim=-1)
+
+    dataloader: DataLoader = DataLoader(
+        tokens,
+        batch_size=batch_size,
+        shuffle=True,
+    )
+    return dataloader"""
+
+
 
 def generate_data(batch_size: int, num_batch: int, params: Dict): #change so that it can generate markov-trigram
     """Generate batch_size*num_batch sequences using the n_gram distribution."""
@@ -102,6 +139,7 @@ def generate_data(batch_size: int, num_batch: int, params: Dict): #change so tha
 
 
 def entropy(params):
+    "Computes the entropy of a weighted batch of distributions."
     pi=params['pi']
     N=params['N']
     pi = t.reshape(pi, (N**2, N))
@@ -110,6 +148,7 @@ def entropy(params):
 
 
 def to_target(tokens, N):
+    """Transform a sequence of token into next-token targets for the cross-entropy."""
     batch_size, max_seq_len = tokens.shape
     target_tokens = t.zeros(batch_size, max_seq_len, N)
     target_tokens[:, :] = t.arange(N)
@@ -117,42 +156,42 @@ def to_target(tokens, N):
     return target_tokens
 
 
-def train(model: Transformer, lr=1e-3, epochs=1, batch_size=2**10, num_batch=5000):
+def train(model: Transformer, lr=1e-3, batch_size=2**10, num_batch=2000):
     optimizer = t.optim.Adam(model.parameters(), lr=lr)
 
     dataloader = generate_data(batch_size, num_batch, model.meta_params)
     ent = entropy(model.meta_params)
 
     Loss = []
-    for _ in range(epochs):
+    for batch in tqdm(dataloader):
+        model_logits = model(batch)
+        model_proba = t.softmax(model_logits, dim=-1)
 
-        for batch in dataloader:
-            model_logits = model(batch)
-            model_proba = t.softmax(model_logits, dim=-1)
+        target_tokens = to_target(batch, model.meta_params['N'])
+        loss = -ent-(target_tokens[:, 2:, :]*t.log(model_proba[:, 1:-1, :])).sum(-1).mean() #why is it converging to 0?
 
-            target_tokens = to_target(batch, model.meta_params['N'])
-            loss = -ent-(target_tokens[:, 2:, :]*t.log(model_proba[:, 1:-1, :])).sum(-1).mean()
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
 
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
-
-            Loss.append(loss.item())
+        Loss.append(loss.item())
     
     return {'Loss': Loss}
 
 
-model = Transformer(d, N, 100, nb_head, nb_layers, max_seq_len, n_gram, pi)
-dict = train(model)
-plt.plot(dict['Loss'])
+"""model = Transformer(10, 100, 0, 1, 5, max_seq_len, n_gram, pi, parallel_heads=20)
+dict = train(model, lr=1e-3, batch_size=2**10, num_batch=2000)
+plt.plot(dict['Loss'], label='best no mlp')
 
-model = Transformer(d, N, 1000, nb_head, nb_layers, max_seq_len, n_gram, pi)
-dict = train(model)
-plt.plot(dict['Loss'])
+model = Transformer(10, 100, 100, 1, 5, max_seq_len, n_gram, pi, parallel_heads=20)
+dict = train(model, lr=1e-3, batch_size=2**10, num_batch=2000)
+plt.plot(dict['Loss'], label='best')
 
-plt.show()
+plt.legend()
+plt.show()"""
 
-"""
+
+
 loss=[]
 lamb_list=[]
 N_list=[]
@@ -163,13 +202,13 @@ nb_head_list=[]
 para_list=[]
 
 count = 0
-max_count = 0
-for N in [50]:
+max_count = 7
+for N in [100]:
     t.manual_seed(0)
     logits = t.randn(N**3)
     for lamb in [2.]:
         pi = t.softmax(lamb*logits, dim=0)
-        for d in [5]:
+        for d in [10, 20, 30, 50, 100, 150, 200]:
             for h in [100]:
                 for nb_head in [1]:
                     for nb_layers in [1]:
@@ -183,7 +222,7 @@ for N in [50]:
 
                             model = Transformer(d, N, h, nb_head, nb_layers, 3, 3, pi, parallel_heads=parallel_heads)
                             lamb_list.append(entropy(model.meta_params).item())
-                            dict = train(model, lr=1e-3, epochs=10, batch_size=2**10, num_batch=200)
+                            dict = train(model, lr=1e-3, batch_size=2**10, num_batch=1500)
                             loss.append(sum(dict['Loss'][-100:-1])/100)
 
                             count+=1
@@ -201,5 +240,4 @@ dict={
 }
 
 data = pd.DataFrame(dict)
-data.to_csv('.csv', index=False)
-"""
+data.to_csv('Scaling_d_new.csv', index=False)
