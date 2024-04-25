@@ -130,7 +130,7 @@ plt.title('Scaling law on the number of parallel heads, with and without MLPs')
 plt.legend()
 plt.show()"""
 
-# print the average d over N
+"""# print the average d over N
 data_d: pd.DataFrame = pd.read_csv('scaling_d_new.csv')
 for N in [100]:
     group = data_d[data_d['N'] == N].groupby(['d'])
@@ -145,4 +145,4 @@ for N in [100]:
 plt.title('Scaling law on the residual dimension (d) and the number of tokens (N)')
 plt.gca().xaxis.set_major_locator(MaxNLocator(integer=True))
 plt.legend()
-plt.show()
+plt.show()"""

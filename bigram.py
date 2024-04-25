@@ -7,57 +7,32 @@ from tqdm import tqdm
 We test here if the empirical loss and the order 2 approximations are close.
 """
 
-#meta parameters
-N = 100
-d = 20
-
-#bigram distributions
-
-l = 1
-pi_z = t.softmax(l*t.randn((N)), dim=-1)
-cat_pi_z = t.distributions.Categorical(pi_z)
-pi_k = t.softmax(l*t.randn((N,N)), dim=-1)
-
-
-unif = t.softmax(t.zeros_like(pi_z), dim=-1)
-def CrossEntropyLoss(pi_z=unif):
-    def loss(pi_k, pi_p):
+def CrossEntropyLoss(pi_z: t.Tensor):
+    def loss(pi_k: t.Tensor, pi_p: t.Tensor):
         best_loss = -(pi_z*(pi_k*t.log(pi_p)).sum(-1)).sum(0)
         return best_loss
     return loss
 
 
-best_loss = CrossEntropyLoss(pi_z=pi_z)(pi_k, pi_k)
-print(f"The best achievable loss is {best_loss}.")
-
-
 class AE_bigram(t.nn.Module):
-    def __init__(self, N, d, train_U=True):
+    def __init__(self, d: int, pi_z: t.Tensor, pi_k: t.Tensor, train_U=True):
         super().__init__()
-        self.W_E = t.nn.Linear(d, N, bias=False)
-        self.W_U = t.nn.Linear(d, N, bias=False)
-        self.W_U.requires_grad_ = train_U
+        N = pi_z.shape[-1]
+        M = pi_k.shape[-1]
 
-        self.N = N
-        self.d = d
+        self.W_E = t.nn.Linear(d, N, bias=False)
+        self.W_U = t.nn.Linear(d, M, bias=False)
+        self.W_U.requires_grad_(train_U)
+
+        self.N: int = N
+        self.M: int = M
+        self.d: int = d
+
+        self.pi_z: t.Tensor = pi_z
+        self.pi_k: t.Tensor = pi_k
 
     def forward(self, x):
         return self.W_U(self.W_E.weight[x])
-    
-    def Q_bound(self, pi_k, pi_z):
-        x = t.arange(0, self.N, 1)
-        with t.no_grad():
-            C_b = C(pi_k)
-
-            logits = self(x)
-            Z = logits - t.log(pi_k)
-            Z -= t.max(Z)
-
-            pos = (Z > 0).to(t.float)
-            neg = pos-1
-
-            bound = (pi_z*(pos*C_b*Z**2/2 + pi_k*neg*Z).sum()).sum()
-            return bound
 
 
 def C(b):
@@ -67,30 +42,24 @@ def C(b):
     return C_b
 
 
-def train(model, lr=1e-4, epochs=15, batch_size: int | str = 2**10, num_batch=1000, compute_approx=False):
-    if batch_size == "opt":
-        f_loss = CrossEntropyLoss(pi_z=pi_z)
-    else:
-        f_loss = CrossEntropyLoss()
+def train(model: AE_bigram, lr=1e-3, epochs=15, batch_size=2**10, num_batch=3000):
+    f_loss = CrossEntropyLoss(t.softmax(t.zeros((batch_size)), dim=-1))
 
+    best_loss = CrossEntropyLoss(pi_z=model.pi_z)(model.pi_k, model.pi_k)
+    cat_pi_z = t.distributions.Categorical(model.pi_z)
     optimizer = t.optim.Adam(model.parameters(), lr=lr)
 
     Loss = []
-    Loss_approx = []
     for _ in tqdm(range(epochs)):
         loss_avg = 0
-        loss_approx_avg = 0
         count = 0
 
         for b in range(num_batch):
-            if batch_size == "opt":
-                X = t.arange(0, model.N, 1)
-            else:
-                X = cat_pi_z.sample((batch_size, 1)).squeeze()
+            ex = cat_pi_z.sample((batch_size, 1)).squeeze()
 
-            model_pi = t.softmax(model(X), dim=-1)
-            true_pi = pi_k[X]
-
+            model_pi = t.softmax(model(ex), dim=-1)
+            true_pi = model.pi_k[ex]
+            
             loss = f_loss(true_pi, model_pi)
             loss.backward()
             optimizer.step()
@@ -99,13 +68,10 @@ def train(model, lr=1e-4, epochs=15, batch_size: int | str = 2**10, num_batch=10
             if (num_batch - b) <= 100:
                 count += 1
                 loss_avg += loss.item()
-                if compute_approx:
-                    loss_approx_avg += model.Q_bound(pi_k, pi_z).item()
 
         Loss.append((loss_avg/count-best_loss))
-        Loss_approx.append((loss_approx_avg/count))
     
-    return {'Div': Loss, 'Q_bound': Loss_approx}
+    return {'Div': Loss}
 
 
 def is_W_E_opt(model, pi_k):
@@ -137,17 +103,113 @@ def is_W_UW_U_Id(model: AE_bigram):
     return t.max(t.abs(pseudo_inv-t.eye(model.N))).item()
 
 
+def Q_bound(model, pi_k, pi_z):
+    x = t.arange(0, model.N, 1)
+    with t.no_grad():
 
-model = AE_bigram(N, d, train_U=True)
-dict = train(model, batch_size="opt", compute_approx=True, epochs=10)
+        logits = model(x)
+        Z = logits - t.log(pi_k)
+        mean = t.cat([t.linspace(minZ, maxZ, 1000).unsqueeze(0) for minZ, maxZ in zip(t.min(Z, dim=-1)[0], t.max(Z, dim=-1)[0])], dim=0)
+        Z = Z.unsqueeze(-1) - mean
 
-plt.plot(dict['Div'], label=f"div {l}")
-plt.plot(dict['Q_bound'], label=f"bound {l}")
-plt.title("Learning comparison")
-plt.xlabel("epochs")
-plt.legend()
+        pos = (Z > 0).to(t.float)
+        neg = pos-1
+
+        D_b = (1-2*pi_k-2*t.log((1-pi_k)/pi_k))/(2*pi_k)
+        D_b = D_b + t.sqrt((1-pi_k)/pi_k + D_b**2)
+        D_b = (D_b/((1+D_b)**2)).unsqueeze(-1)
+
+        p_exp = t.min(t.exp(pos*Z)*(pi_k/(1-pi_k)).unsqueeze(-1), t.ones_like(t.exp(pos*Z)*(pi_k/(1-pi_k)).unsqueeze(-1)))
+        C_b = (p_exp)/((1+p_exp)**2)
+
+        bound_1 = (pi_z.unsqueeze(-1)*(pos*C_b*Z**2/2 + pi_k.unsqueeze(-1)*neg*Z).sum(1)).sum(0)
+        bound_1 = t.min(bound_1)
+
+        bound_2 = (pi_z.unsqueeze(-1)*(C_b*Z**2/2 + pi_k.unsqueeze(-1)*neg*Z).sum(1)).sum(0)
+        bound_2 = t.min(bound_2)
+
+        bound_3 = (pi_z.unsqueeze(-1)*(pos*C_b*Z**2/2 + pi_k.unsqueeze(-1)*t.abs(Z)).sum(1)).sum(0)
+        bound_3 = t.min(bound_3)
+
+        bound_4 = (pi_z.unsqueeze(-1)*(C_b*Z**2/2 + pi_k.unsqueeze(-1)*t.abs(Z)).sum(1)).sum(0)
+        bound_4 = t.min(bound_4)
+
+        bound_5 = (pi_z.unsqueeze(-1)*(p_exp*Z**2/2 + pi_k.unsqueeze(-1)*t.abs(Z)).sum(1)).sum(0)
+        bound_5 = t.min(bound_5)
+
+        bound_6 = (pi_z.unsqueeze(-1)*(pos*D_b*Z**2/2 + pi_k.unsqueeze(-1)*neg*Z).sum(1)).sum(0)
+        bound_6 = t.min(bound_6)
+
+        bound_7 = (pi_z.unsqueeze(-1)*(Z**2/8 + pi_k.unsqueeze(-1)*t.abs(Z)).sum(1)).sum(0)
+        bound_7 = t.min(bound_7)
+        return bound_1, bound_2, bound_3, bound_4, bound_5, bound_6, bound_7
+
+
+#meta parameters
+N = 100
+M = 100
+d = 10
+
+#bigram distributions
+l = 1
+pi_z = t.softmax(l*t.randn(N), dim=-1)
+pi_k = t.softmax(l*t.randn(N, M), dim=-1)
+
+model = AE_bigram(d, pi_z, pi_k, train_U=True)
+dict = train(model)
+plt.plot(dict['Div'])
+
 plt.show()
 
+
+"""
+Bound_1=[]
+Bound_2=[]
+Bound_3=[]
+Bound_4=[]
+Bound_5=[]
+Bound_6=[]
+Bound_7=[]
+entropy=[]
+Div=[]
+for l in t.linspace(0, 4, 30):
+    pi_z = t.softmax(l*t.randn((N)), dim=-1)
+    cat_pi_z = t.distributions.Categorical(pi_z)
+    pi_k = t.softmax(l*t.randn((N,N)), dim=-1)
+
+    best_loss = CrossEntropyLoss(pi_z=pi_z)(pi_k, pi_k)
+    entropy.append(best_loss.unsqueeze(0))
+
+    model = AE_bigram(N, d, pi_z, pi_k, train_U=True)
+    dict = train(model, batch_size="opt", epochs=10)
+    div = dict['Div'][-1]
+    Div.append(div.unsqueeze(0))
+
+    bound_1, bound_2, bound_3, bound_4, bound_5, bound_6, bound_7 = Q_bound(model, pi_k, pi_z)
+    Bound_1.append((bound_1).unsqueeze(0))
+    Bound_2.append((bound_2).unsqueeze(0))
+    Bound_3.append((bound_3).unsqueeze(0))
+    Bound_4.append((bound_4).unsqueeze(0))
+    Bound_5.append((bound_5).unsqueeze(0))
+    Bound_6.append((bound_6).unsqueeze(0))
+    Bound_7.append((bound_7).unsqueeze(0))
+
+entropy: t.Tensor = t.cat(entropy, dim=0)
+entropy, indices = t.sort(entropy)
+
+plt.plot(entropy, t.cat(Div, dim=0)[indices], label=f"divergence")
+plt.plot(entropy, t.cat(Bound_1, dim=0)[indices], label=f"optimal")
+plt.plot(entropy, t.cat(Bound_2, dim=0)[indices], label=f"pos maj")
+plt.plot(entropy, t.cat(Bound_3, dim=0)[indices], label=f"neg maj")
+plt.plot(entropy, t.cat(Bound_4, dim=0)[indices], label=f"pos and neg maj")
+plt.plot(entropy, t.cat(Bound_5, dim=0)[indices], label=f"pos neg and coef maj")
+plt.plot(entropy, t.cat(Bound_6, dim=0)[indices], label=f"opt all context")
+plt.plot(entropy, t.cat(Bound_7, dim=0)[indices], label=f"worst")
+plt.title("Bound comparison for different entropies")
+plt.xlabel("Entropy")
+plt.legend()
+plt.show()
+"""
 
 
 """Div = []
