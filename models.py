@@ -35,6 +35,7 @@ class Transformer(t.nn.Module):
         """
 
         assert d%nb_head == 0
+        self.use_mlp = nb_layers*depth*width > 0 
         self.meta_params: Dict[str, int] = {
             'd': d,
             'N': N,
@@ -64,11 +65,15 @@ class Transformer(t.nn.Module):
         )
 
         #Implements MLPs with fixed width and depth at each layer.
-        self.mlp_seq = t.nn.Sequential(
-            *[t.nn.Sequential(
-                *([t.nn.Linear(d, width, bias=True)] + [t.nn.GELU() if i%2 == 0 else t.nn.Linear(width, width, bias=True) for i in range(2*(depth-1)+1)] + [t.nn.Linear(width, d, bias=False)])
-            ) for _ in range(nb_layers)]
-        )
+        #Doesn't implements if 0 layers of 0 hidden layers or 0 width.
+        if self.use_mlp:
+            self.mlp_seq = t.nn.Sequential(
+                *[t.nn.Sequential(
+                    *([t.nn.Linear(d, width, bias=True)] + [t.nn.GELU() if i%2 == 0 else t.nn.Linear(width, width, bias=True) for i in range(2*(depth-1)+1)] + [t.nn.Linear(width, d, bias=False)])
+                ) for _ in range(nb_layers)]
+            )
+        else:
+            self.mlp_seq = t.nn.Sequential()
 
         self.unemb = t.nn.Linear(d, N, bias=False)
 
@@ -106,6 +111,7 @@ class Transformer(t.nn.Module):
         attn_mask = (t.tril(t.ones((seq_len, seq_len))) == 0).to(device)
         computation: Dict[str, t.Tensor] = {}
 
+        #We look at possible computation short-cut.
         skips = self.skips
         skip_res_connection = 0 if skips['skip_res_connection'] else 1
         skip_pos_QK = 0 if skips['skip_pos_QK'] else 1
@@ -133,18 +139,21 @@ class Transformer(t.nn.Module):
 
                 para_res += attn_j
                 if out_computation:
-                    computation[f'attn_{j}_para_{i}'] = attn_j
+                    computation[f'para_{j}_layer_{i}'] = attn_j
 
             res = para_res + res*skip_res_connection
             if out_computation:
-                computation[f'res_after_attn_{i}'] = res
+                computation[f'res_after_attn_layer_{i}'] = res
                 
             norm_res = layer_norm(res)
-            mlp_out = mlp(norm_res)
+            if self.use_mlp:
+                mlp_out = mlp(norm_res)
+            else:
+                mlp_out = t.zeros_like(norm_res)
             res = mlp_out + res
             if out_computation:
                 computation[f'mlp_{i}'] = mlp_out
-                computation[f'res_after_mlp_{i}'] = res
+                computation[f'res_after_mlp_layer_{i}'] = res
             
         logits: t.Tensor = self.unemb(res) #no layer-norm at the end, we want modular temperature
         logits = logits - logits.mean()
@@ -154,25 +163,44 @@ class Transformer(t.nn.Module):
     
 
 class Low_rank(t.nn.Module):
-    def __init__(self, N: int, d: int, n_gram: int, context_window: int, pi: List[t.Tensor]) -> None:
+    def __init__(self, d: int, N: int, context_window: int, pi: List[t.Tensor]) -> None:
         super().__init__()
-        self.word_emb = t.nn.Linear(d, N**2, bias=False)
+        n_gram = len(pi)
+        self.word_emb = t.nn.Linear(d, N**(n_gram-1), bias=False)
         self.unemb = t.nn.Linear(d, N, bias=False)
 
         self.meta_params: Dict[str, int] = {
             'd': d,
             'N': N,
-            'h': 0,
+            'width': 0,
             'depth': 0,
-            'n_gram': n_gram,
             'nb_head': 0,
             'context_window': context_window,
             'nb_layers': 0,
+            'para': 0,
+            'n_gram': n_gram,
         }
         self.pi: List[t.Tensor] = pi
 
 
+    def compute_div(self):
+        """
+        Compute the closed-form divergence.
+        """
+        with t.no_grad():
+            W_E = self.word_emb.weight.detach()
+            W_U = self.unemb.weight.detach()
+            f = W_E@W_U.mH 
+            L = t.log(self.pi[2].flatten(0, 1))
+            PI = self.pi[2].flatten(0, 1)
+            Z = f - L - ((f-L)*PI).sum(-1, keepdim=True)
+            return t.log((t.exp(Z)*PI).sum(-1)).mean()
+
+
     def freeze(self, freezer: Dict[str, bool]) -> None:
+        """
+        Freezes the training of the embedding and/or unembedding.
+        """
         freeze_E = not(freezer['freeze_E'])
         freeze_U = not(freezer['freeze_U'])
 
@@ -180,9 +208,12 @@ class Low_rank(t.nn.Module):
         self.unemb.requires_grad_(freeze_U)
 
 
-    def forward(self, x: t.Tensor) -> Tuple[t.Tensor, Dict[str, t.Tensor]]:
+    def forward(self, x: t.Tensor) -> Tuple[t.Tensor, Dict[str, t.Tensor]]: #works for trigram only
         x = x[:, :-1] + x[:, 1:]*self.meta_params['N']
-        x = t.cat([t.zeros(x.shape[0], 1).to(t.int).to(device), x], dim=1)
+
+        #concatenates anything in first position since we don't care about i-th prediction for i < n-gram - 1
+        x = t.cat([t.zeros(x.shape[0], 1).to(t.int).to(device), x], dim=1) 
+
         logits = self.unemb(self.word_emb.weight[x])
         logits = logits - logits.mean()
         return logits, {}

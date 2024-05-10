@@ -4,9 +4,6 @@ import unittest
 import torch as t
 import numpy as np
 
-if __name__ == '__main__':
-    unittest.main()
-
 #Tests for utils
 from utils import power_unif_law, entropy, generate_data, layer_norm
 
@@ -106,3 +103,6 @@ class Test_layer_norm(unittest.TestCase):
 
 #Test interp
 #TODO
+
+if __name__ == '__main__':
+    unittest.main()

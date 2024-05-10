@@ -1,5 +1,5 @@
 import torch as t
-from typing import List
+from typing import List, Tuple
 from torch.utils.data import DataLoader, TensorDataset
 
 def layer_norm(x: t.Tensor, eps=1e-10) -> t.Tensor:
@@ -48,7 +48,7 @@ def generate_data(batch_size: int, num_batch: int, pi: List[t.Tensor], context_w
     return dataloader
 
 
-def generate_each(pi: List[t.Tensor], eps: float = 1e-6) -> t.Tensor:
+def generate_each(pi: List[t.Tensor], eps: float = 1e-10) -> t.Tensor:
     """Generate every sequences of tokens that have more than probability eps."""
     n_gram = len(pi)
     N = pi[0].shape[0]
@@ -65,8 +65,7 @@ def generate_each(pi: List[t.Tensor], eps: float = 1e-6) -> t.Tensor:
             is_non_zero = is_non_zero and (cumulative_proba > eps)
         if is_non_zero:
             tokens.append(indices)
-
-    return t.tensor(tokens, dtype=t.int)
+    return t.tensor(tokens, dtype=t.long)
 
 
 def entropy(pi: List[t.Tensor], eps=1e-10) -> t.Tensor:
@@ -88,4 +87,104 @@ def power_unif_law(alphas: List[float], nb_tokens: List[int], N: int) -> List[t.
         dist[nb_token:] = 0
         dist = dist/dist.sum()
         pi.append(t.cat([dist[t.randperm(N)] for _ in range(N**i)], dim=0).reshape((N,)*(i+1)))
+    return pi
+
+
+def first_position_law(nb_tokens: List[int], N: int, d: int, feature_importance=1.) -> List[t.Tensor]:
+    """
+    Generate a distribution which is random on the first d position, and uniform on the rest.
+    """
+    pi=[]
+    for i, nb_token in enumerate(nb_tokens):
+        dist = t.Tensor([1 for i in range(N)])
+        dist[nb_token:] = 0
+        dist = dist/dist.sum()
+        pi.append(t.cat([dist[t.randperm(N)] for _ in range(N**i)], dim=0).reshape((N,)*(i+1)))
+
+    dists = []
+    mask = t.zeros(N)
+    mask[:d] = 1
+    for _ in range(N**len(nb_tokens)):
+        logits = t.randn(N)*mask*t.Tensor([feature_importance**i for i in range(N)])
+        dists.append(t.softmax(logits, dim=0).unsqueeze(0))
+    pi.append(t.cat(dists, dim=0).reshape((N,)*(len(nb_tokens)+1)))
+    return pi
+
+
+def last_position_law(nb_tokens: List[int], N: int, k: int, p:float) -> List[t.Tensor]:
+    """
+    Generate a distribution which has probability p on one of the tokens, and uniform otherwise.
+    The token which has probability p is chosen randomly with a meta-probability scaling as a Zipf law of power k.
+    The priori distribution is always uniform.
+    """
+
+    pi=[]
+    for i, nb_token in enumerate(nb_tokens):
+        dist = t.Tensor([1 for i in range(N)])
+        dist[nb_token:] = 0
+        dist = dist/dist.sum()
+        pi.append(t.cat([dist[t.randperm(N)] for _ in range(N**i)], dim=0).reshape((N,)*(i+1)))
+
+    dists = []
+    for _ in range(N**len(nb_tokens)):
+        meta = t.Tensor([(1-i/N)**k for i in range(N)])
+        meta_choice = t.distributions.Categorical(probs=meta/(meta.sum()))
+        choice = meta_choice.sample((1,))
+        dist = t.Tensor([p if i==choice else (1-p)/(N-1) for i in range(N)])
+        dists.append(dist.unsqueeze(0))
+    pi.append(t.cat(dists, dim=0).reshape((N,)*(len(nb_tokens)+1)))
+    return pi
+
+
+def gen_d_law(nb_tokens: List[int], N: int, d: int, axis_aligned=False, feature_importance=1., flat_coef=0.1) -> Tuple[List[t.Tensor], t.Tensor]:
+    """
+    Generate a distribution of rank d.
+    If axis_aligned=True, then the distribution is generated alog the first d coordinates.
+    The priori distribution is always uniform.
+    """
+
+    pi=[]
+    for i, nb_token in enumerate(nb_tokens):
+        dist = t.Tensor([1 for _ in range(N)])
+        dist[nb_token:] = 0
+        dist = dist/dist.sum()
+        pi.append(t.cat([dist[t.randperm(N)] for _ in range(N**i)], dim=0).reshape((N,)*(i+1)))
+
+    directions = t.nn.Linear(d, N).requires_grad_(False)
+    if axis_aligned:
+        directions.weight = t.nn.Parameter(t.eye(N)[:, :d]).requires_grad_(False)
+    else:
+        directions.weight = t.nn.Parameter(t.randn((N, N))[:, :d]).requires_grad_(False)
+
+    dists=[]
+    for _ in range(N**len(nb_tokens)):
+        logits = directions(t.randn(d)*t.Tensor([feature_importance**i for i in range(d)]))
+        dists.append(t.softmax(logits*flat_coef, dim=-1).unsqueeze(0))
+    pi.append(t.cat(dists, dim=0).reshape((N,)*(len(nb_tokens)+1)))
+    return pi, directions.weight
+
+
+def almost_rank_d(nb_tokens: List[int], N: int, d: int, axis_aligned=False, eig_high=1., eig_low=0.1) -> List[t.Tensor]:
+    """
+    Generate a distribution which has almost rank d.
+    If axis_aligned=True, then the distribution is generated alog the first d coordinates.
+    The priori distribution is always uniform.
+    """
+    n_gram = len(nb_tokens)+1
+
+    pi=[]
+    for i, nb_token in enumerate(nb_tokens):
+        dist = t.Tensor([1 for _ in range(N)])
+        dist[nb_token:] = 0
+        dist = dist/dist.sum()
+        pi.append(t.cat([dist[t.randperm(N)] for _ in range(N**i)], dim=0).reshape((N,)*(i+1)))
+
+    logits = t.randn((N**(n_gram-1), N))
+    U, eig, V = t.linalg.svd(logits)
+    eig = t.Tensor([eig_high if i<d else eig_low for i in range(N)])
+    if axis_aligned:
+        V = t.eye(N)
+    logits = t.einsum('MN, N, Nn -> Mn', U[:, :N], eig, V)
+
+    pi.append(t.softmax(logits, dim=-1).reshape((N,)*n_gram))
     return pi
