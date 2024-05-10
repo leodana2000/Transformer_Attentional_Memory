@@ -9,7 +9,7 @@ def layer_norm(x: t.Tensor, eps=1e-10) -> t.Tensor:
     return (x-mean_x)/(t.sqrt(var_x)+eps)
 
 
-def generate_data(batch_size: int, num_batch: int, pi: List[t.Tensor], context_window: int, one_extra=False) -> DataLoader:
+def generate_data(batch_size: int, num_batch: int, pi: List[t.Tensor], context_window: int) -> DataLoader:
     """
     Generate data using a k-states markov chain given by the distribution pi.
     Each token i for i<n_gram is given by pi[i][previous_tokens],
@@ -21,8 +21,6 @@ def generate_data(batch_size: int, num_batch: int, pi: List[t.Tensor], context_w
     n_gram = len(pi)
     assert context_window >= n_gram
 
-    extra = 1 if one_extra else 0
-
     token_list: List[t.Tensor] = []
     for i in range(n_gram):
         if i == 0:
@@ -32,7 +30,7 @@ def generate_data(batch_size: int, num_batch: int, pi: List[t.Tensor], context_w
             token = t.multinomial(pi[i][*token_list, :], 1).squeeze()
             token_list.append(token)
         elif i == n_gram-1:
-            for _ in range(context_window-n_gram+1+extra):
+            for _ in range(context_window-n_gram+1):
                 token = t.multinomial(pi[n_gram-1][*token_list[-n_gram+1:], :], 1).squeeze()
                 token_list.append(token)
     

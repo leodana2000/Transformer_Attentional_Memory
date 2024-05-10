@@ -10,20 +10,32 @@ device = 'cpu' #mps is way slower!
 
 
 def compute_loss(model: Union[Transformer, Low_rank], batch: t.Tensor, ent: t.Tensor, loss_fn, next_token: bool) -> t.Tensor:
+    """
+    Computes the loss of the model on a batch, and adds the entropy for normalization.
+    If next_token=True, the predictions are compared with the next token.
+    Otherwise, the predictions are compared with the full probability from pi.
+    """
+
     batch = batch.to(device)
     model_logits = model(batch)[0]
     model_proba = t.softmax(model_logits, dim=-1)
+    pred_proba = model_proba[:, 1:-1, :]+1e-12
 
-    target = batch[:, 2:]
     if next_token:
-        loss = - ent + loss_fn(t.log(model_proba[:, 1:-1, :].flatten(0, 1)+1e-12), target.flatten(0, 1))
+        target = batch[:, 2:]
+        loss = - ent + loss_fn(t.log(pred_proba.flatten(0, 1)), target.flatten(0, 1))
     else:
-        loss = - ent + model.pi[2][batch[:-2], batch[1:-1]]*t.log(model_proba[:, 1:-1, :]+1e-12)
+        true_proba = model.pi[2][batch[:, :-2], batch[:, 1:-1]].detach()
+        loss = - ent - (true_proba*t.log(pred_proba)).sum(-1).mean()
     del batch
     return loss
 
 
 def compute_acc(model: Union[Transformer, Low_rank], batch: t.Tensor) -> t.Tensor:
+    """
+    Compute the accuracy of the model for predicting the correct token.
+    Meaningfull only if the task is to learn a look-up table, low-entropy distribution.
+    """
     with t.no_grad():
         model_logits = model(batch)[0]
         predictions = t.argmax(model_logits, dim=-1)
@@ -33,6 +45,10 @@ def compute_acc(model: Union[Transformer, Low_rank], batch: t.Tensor) -> t.Tenso
 
 
 def train(model: Union[Transformer, Low_rank], dataloader: DataLoader, lr: float=1e-3, next_token: bool=True, seed: int=0) -> Dict[str, List[float]]:
+    """
+    Trains the model and return the loss over all batch.
+    """
+    
     t.manual_seed(seed)
     model.to(device)
     optimizer = t.optim.Adam(model.parameters(), lr=lr)
