@@ -73,7 +73,7 @@ class Transformer(t.nn.Module):
                 ) for _ in range(nb_layers)]
             )
         else:
-            self.mlp_seq = t.nn.Sequential()
+            self.mlp_seq = t.nn.Sequential(*[t.nn.Sequential()]*len(self.attn_seq))
 
         self.unemb = t.nn.Linear(d, N, bias=False)
 

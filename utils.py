@@ -186,3 +186,25 @@ def almost_rank_d(nb_tokens: List[int], N: int, d: int, axis_aligned=False, eig_
 
     pi.append(t.softmax(logits, dim=-1).reshape((N,)*n_gram))
     return pi
+
+
+#Heatmap display
+
+import seaborn as sns
+import ipywidgets as widgets 
+from IPython.display import display, clear_output
+
+def display_heatmaps(heatmap_list):
+    num_heatmaps = len(heatmap_list)
+    slider = widgets.IntSlider(value=0, min=0, max=num_heatmaps-1, step=1, description='Select Heatmap:')
+
+    sns.heatmap(heatmap_list[0], center=0, cmap='bwr') # Display the first heatmap initially
+
+    def update_heatmap(change):
+        clear_output(wait=True)
+        sns.heatmap(heatmap_list[change['new']], center=0, cmap='bwr')
+        display(slider)
+
+    slider.observe(update_heatmap, names='value')
+
+    display(slider)

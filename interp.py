@@ -1,6 +1,7 @@
 import torch as t
 import numpy as np
-from typing import List
+import seaborn as sns
+from typing import List, Dict
 from models import Transformer
 import matplotlib.pyplot as plt
 
@@ -29,6 +30,26 @@ def attention_map(model: Transformer, layer: int, para: int):
     return map
 
 
+def new_computation_basis(model: Transformer, examples: t.Tensor) -> Dict['str', t.Tensor]:
+    """
+    Changes the computations into a new basis.
+    """
+    with t.no_grad():
+        _, computation = model.forward(examples, out_computation=True)
+
+    W_U = model.unemb.weight.detach()
+    pseudo_inv_W_U = W_U@t.linalg.inv(W_U.mH@W_U)
+
+    new_computations = {}
+    for key in computation.keys():
+        if key != 'logits':
+            new_computations[key] = computation[key]@(pseudo_inv_W_U.mH)
+        else:
+            new_computations[key] = computation[key]
+
+    return new_computations
+
+
 #Logits backtracking
 def back_track(model: Transformer, examples: t.Tensor, seq_target: int = 2) -> List[List[List[np.ndarray]]]:
     """
@@ -44,7 +65,7 @@ def back_track(model: Transformer, examples: t.Tensor, seq_target: int = 2) -> L
 
         N = model.meta_params['N']
         nb_layers = model.meta_params['nb_layers']
-        para = model.meta_params['para']
+        paras = model.meta_params['para']
 
         mean_logit = computation['logits'][:, seq_target-1].mean(dim=-1)
 
@@ -53,19 +74,20 @@ def back_track(model: Transformer, examples: t.Tensor, seq_target: int = 2) -> L
             direction = model.unemb.weight[id]
 
             id_list = []
-            for i in range(nb_layers):
+            for layer in range(nb_layers):
                 layer_list = []
-                for j in range(para):
-                    layer_list.append(np.array(t.einsum('d, ...d -> ...', direction, computation[f'attn_{j}_para_{i}'][0][:, seq_target-1]).detach()-mean_logit))
+                for para in range(paras):
+                    layer_list.append(np.array(t.einsum('d, ...d -> ...', direction, computation[f'para_{para}_layer_{layer}'][:, seq_target-1]).detach()-mean_logit))
                 id_list.append(layer_list)
 
-            id_list.append([np.array(t.einsum('d, ...d -> ...', direction, computation[f'res_{0}'][0, seq_target-1]).detach()-mean_logit)])
+                id_list.append([np.array(t.einsum('d, ...d -> ...', direction, computation[f'res_{layer}'][:, seq_target-1]).detach()-mean_logit)])
+                id_list.append([np.array(t.einsum('d, ...d -> ...', direction, computation[f'res_after_attn_layer_{layer}'][:, seq_target-1]).detach()-mean_logit)])
             contribution_list.append(id_list)
 
     return contribution_list
 
     
-def by_attention(contribution: List[List[List[np.ndarray]]], examples: t.Tensor, layer: int, para: int, max_para: List[int], seq_target: int = 2, sort: bool = False) -> t.Tensor:
+def by_attention(contribution: List[List[List[np.ndarray]]], examples: t.Tensor, layer: int, para: int, seq_target: int = 2, sort = False, method = 'solo') -> t.Tensor:
     """
     Project for an attention module, its contribution on each correct next_token, 
     and compares it with the max logit contribution of this head, and other heads.
@@ -74,25 +96,17 @@ def by_attention(contribution: List[List[List[np.ndarray]]], examples: t.Tensor,
     next_tokens = examples[:, seq_target]
     nb_tokens = len(next_tokens)
     
-    contrib = t.tensor(np.array([contrib[:-1] for contrib in contribution]))
-    contrib_l_para = contrib[next_tokens[t.arange(nb_tokens)], layer, para, t.arange(nb_tokens)]
-    contrib_max = t.concat([t.max(contrib[t.logical_not(next_tokens[j] == t.arange(N))][:, layer, para, j], dim=0)[0].unsqueeze(0) for j in t.arange(nb_tokens)], dim=0)
+    if method == 'group':
+        contrib = t.tensor(np.array([contrib[-1] for contrib in contribution]))
+        contrib_l_para = contrib[next_tokens[t.arange(nb_tokens)], layer, t.arange(nb_tokens)]
+        contrib_max = t.concat([t.max(contrib[t.logical_not(next_tokens[j] == t.arange(N))][:, layer, j], dim=0)[0].unsqueeze(0) for j in t.arange(nb_tokens)], dim=0)
+    elif method == 'solo':
+        contrib = t.tensor(np.array([contrib[:-2] for contrib in contribution]))
+        contrib_l_para = contrib[next_tokens[t.arange(nb_tokens)], layer, para, t.arange(nb_tokens)]
+        contrib_max = t.concat([t.max(contrib[t.logical_not(next_tokens[j] == t.arange(N))][:, layer, para, j], dim=0)[0].unsqueeze(0) for j in t.arange(nb_tokens)], dim=0)
+    elif method == '':
+        pass
     token_num = t.arange(len(contrib_l_para))
-    
-    """argmax = [t.max(contrib[t.logical_not(next_tokens[j] == t.arange(N))][:, layer, para, j], dim=0)[1] for j in t.arange(nb_tokens)]
-
-    contrib_max = []
-    for p in max_para:
-        contrib_max.append([contrib[argmax[j], layer, p, j] for j in t.arange(nb_tokens)])
-    token_num = t.arange(len(contrib_l_para))
-
-    width = .8/(len(max_para)+1)
-    mean = 1/2 - width/2
-    plt.bar(token_num - mean, contrib_l_para, width=width, label='Contribution to the correct logit')
-    for para in range(len(max_para)):
-        plt.bar(token_num - mean + 2*mean*((para+1)/(len(max_para)+1)), contrib_max[para], width=width, label=f'Max logit contribution head {para}')
-    plt.legend()
-    plt.show()"""
 
     if sort:
         contrib = t.sort(contrib_l_para-contrib_max, descending=True)[0]
@@ -105,6 +119,27 @@ def by_attention(contribution: List[List[List[np.ndarray]]], examples: t.Tensor,
     plt.title("Differential contribution to the correct logit for each possible pair.")
     plt.show()
     return contrib_l_para
+
+
+def every_attention(contribution: List[List[List[np.ndarray]]], examples: t.Tensor, layer: int, seq_target: int = 2) -> None:
+    """
+    """
+    N = len(contribution)
+    next_token = examples[0, seq_target].to(t.int).item()
+    nb_heads = len(contribution[0][0])
+
+    contrib = t.tensor(np.array([contrib[:-2] for contrib in contribution]))
+    contrib_l_para = contrib[:, layer, :, 0]
+    contrib_max = t.max(contrib_l_para[t.logical_not(t.arange(N) == next_token)], dim = 0, keepdim=True)[0]
+
+    contrib = (contrib_l_para-contrib_max).unsqueeze(-1)
+    contrib = t.concat([contrib[:, i] for i in range(nb_heads)] + [contrib.sum(dim=1)], dim = 1)
+    best = t.argmax(contrib.sum(dim=1))
+
+    sns.heatmap(contrib, center=0, xticklabels = [f"Head {i}" for i in range(nb_heads)]+["Both"], yticklabels=["Correct and best" if i==next_token and i==best else "Best" if i==best else "Correct" if i==next_token else f"token {i}" for i in range(N)], cmap='bwr')
+    plt.ylabel('Output token')
+    plt.title("Differential contribution to the correct logit for each possible pair.")
+    plt.show()
 
 
 #SVD of W_O

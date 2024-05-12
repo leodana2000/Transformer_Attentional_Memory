@@ -40,7 +40,7 @@ def compute_acc(model: Union[Transformer, Low_rank], batch: t.Tensor) -> t.Tenso
         model_logits = model(batch)[0]
         predictions = t.argmax(model_logits, dim=-1)
         target = batch[:, 2:]
-        acc = (predictions == target).to(t.float).mean()
+        acc = (predictions[:, 1:-1] == target).to(t.float).mean()
     return acc
 
 
