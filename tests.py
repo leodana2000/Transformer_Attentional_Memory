@@ -1,3 +1,6 @@
+"""
+A file to test if the main .py works as intended.
+"""
 
 # Tests
 import unittest
@@ -102,6 +105,9 @@ class Test_layer_norm(unittest.TestCase):
 #TODO
 
 #Test interp
+#TODO
+
+#Test models
 #TODO
 
 if __name__ == '__main__':
