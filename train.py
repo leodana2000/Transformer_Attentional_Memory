@@ -46,7 +46,7 @@ def compute_acc(model: Union[Transformer, Low_rank], batch: t.Tensor) -> t.Tenso
 
 def train(model: Union[Transformer, Low_rank], dataloader: DataLoader, lr: float=1e-3, next_token: bool=True, seed: int=0) -> Dict[str, List[float]]:
     """
-    Trains the model and return the loss over all batch.
+    Trains the model and return the loss and accuracy over all batches.
     """
     
     t.manual_seed(seed)
@@ -70,3 +70,41 @@ def train(model: Union[Transformer, Low_rank], dataloader: DataLoader, lr: float
     model.to('cpu')
     
     return {'Loss': Loss, 'Acc': Acc}
+
+
+def train_boosting(model: Union[Transformer, Low_rank], dataloaders: List[DataLoader], lr: float=1e-3, next_token: bool=True, seed: int=0) -> Dict[str, List[float]]:
+    """
+    Trains the model head by head, and return the loss and accuracy over all batches.
+    """
+
+    para = model.meta_params['para']
+    freezer = {
+        'freeze_E': False,
+        'freeze_pos': False,
+        'freeze_U': False,
+        'freeze_Attn': [[{'freeze_O': True, 'freeze_QKV': True} for _ in range(para)]]
+    }
+    model.freeze(freezer)
+    model.skips['skip_attn'] = [[True for _ in range(para)]]
+
+    dict: Dict[str, List[float]] = {'Loss': [], 'Acc': []}
+    for para in range(para):
+        model.skips['skip_attn'][0][para] = False
+
+        freezer['freeze_Attn'][0][para]['freeze_O'] = False
+        freezer['freeze_Attn'][0][para]['freeze_QKV'] = False
+        for ind in range(para):
+            freezer['freeze_Attn'][0][ind]['freeze_O'] = True
+            freezer['freeze_Attn'][0][ind]['freeze_QKV'] = True
+        model.freeze(freezer)
+
+
+        dict_para = train(model, dataloaders[para], lr, next_token=next_token, seed=seed)
+        dict['Loss'] += dict_para['Loss']
+        dict['Acc'] += dict_para['Acc']
+
+        freezer['freeze_E'] = True
+        freezer['freeze_U'] = True
+        freezer['freeze_pos'] = True
+    
+    return dict

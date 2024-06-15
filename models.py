@@ -1,16 +1,10 @@
 import torch as t
+import numpy as np
 from typing import Dict, List, Tuple
-from utils import layer_norm
+from utils import layer_norm, compute_div
 
 device = 'cpu' #mps is way slower!
 cosim = t.nn.CosineSimilarity(dim=-1)
-default_skips: Dict[str, bool] = {
-    'skip_res_connection': False,
-    'skip_pos_QK': False,
-    'skip_emb_QK': False,
-    'skip_pos_OV': False,
-    'skip_emb_OV': False,
-}
 
 
 class Transformer(t.nn.Module):
@@ -19,7 +13,7 @@ class Transformer(t.nn.Module):
     def __init__(
             self, d: int, N: int, nb_layers: int, width: int, depth: int, 
             parallel_heads: int, nb_head: int, context_window: int, 
-            pi: List[t.Tensor], skips: Dict[str, bool] = default_skips
+            pi: List[t.Tensor], argmax_mode: bool=False,
             ) -> None:
         """
         Parameters.
@@ -47,8 +41,18 @@ class Transformer(t.nn.Module):
             'context_window': context_window,
             'n_gram': len(pi),
         }
-        self.skips: Dict[str, bool] = skips
+
+        self.skips = {
+            'skip_res_connection': False,
+            'skip_pos_QK': False,
+            'skip_emb_QK': False,
+            'skip_pos_OV': False,
+            'skip_emb_OV': False,
+            'skip_attn': [[False for _ in range(parallel_heads)] for _ in range(nb_layers)],
+        }
+        
         self.pi: List[t.Tensor] = pi
+        self.argmax_mode: bool=argmax_mode
 
         super().__init__()
 
@@ -64,6 +68,17 @@ class Transformer(t.nn.Module):
             for _ in range(nb_layers)]
         )
 
+        for attn_layer in self.attn_seq:
+            for attn_para in attn_layer:
+                attn_para._qkv_same_embed_dim = False
+                attn_para.q_proj_weight = t.nn.Parameter(t.empty((d, d//nb_head)))
+                attn_para.k_proj_weight = t.nn.Parameter(t.empty((d, d//nb_head)))
+                attn_para.v_proj_weight = t.nn.Parameter(t.empty((d, d//nb_head)))
+                t.nn.init.xavier_uniform_(attn_para.q_proj_weight)
+                t.nn.init.xavier_uniform_(attn_para.k_proj_weight)
+                t.nn.init.xavier_uniform_(attn_para.v_proj_weight)
+                attn_para.register_parameter('in_proj_weight', None)
+
         #Implements MLPs with fixed width and depth at each layer.
         #Doesn't implements if 0 layers of 0 hidden layers or 0 width.
         if self.use_mlp:
@@ -78,26 +93,40 @@ class Transformer(t.nn.Module):
         self.unemb = t.nn.Linear(d, N, bias=False)
 
 
-    def freeze(self, freezer: Dict[str, bool]) -> None:
-        freeze_E = not(freezer['freeze_E'])
-        freeze_pos = not(freezer['freeze_pos'])
-        freeze_QKV = not(freezer['freeze_QKV'])
-        freeze_O = not(freezer['freeze_O'])
-        freeze_U = not(freezer['freeze_U'])
+    def low_init(self, scale: float=1) -> None:
+        self.word_emb.weight = t.nn.Parameter(t.randn_like(self.word_emb.weight)*scale/(np.sqrt(self.word_emb.weight.shape[0]*self.word_emb.weight.shape[1])))
+        self.pos_emb.weight = t.nn.Parameter(t.randn_like(self.pos_emb.weight)*scale/(np.sqrt(self.pos_emb.weight.shape[0]*self.pos_emb.weight.shape[1])))
+        self.unemb.weight = t.nn.Parameter(t.randn_like(self.unemb.weight)*scale/(np.sqrt(self.unemb.weight.shape[0]*self.unemb.weight.shape[1])))
+        for attn in self.attn_seq:
+            att: t.nn.MultiheadAttention
+            for att in attn:
+                att.in_proj_weight.data = t.nn.Parameter(t.randn_like(att.in_proj_weight.data)*scale/(np.sqrt(att.in_proj_weight.data.shape[0]*att.in_proj_weight.data.shape[1])))
+                att.out_proj.weight = t.nn.Parameter(t.randn_like(att.out_proj.weight)*scale/(np.sqrt(att.out_proj.weight.shape[0]*att.out_proj.weight.shape[1])))
 
+
+    def freeze(self, freezer) -> None:
+        freeze_E = not(freezer['freeze_E'])
         self.word_emb.requires_grad_(freeze_E)
+
+        freeze_pos = not(freezer['freeze_pos'])
         self.pos_emb.requires_grad_(freeze_pos)
 
-        for para_attn in self.attn_seq:
-            attn: t.nn.MultiheadAttention
-            for attn in para_attn:
-                attn.in_proj_weight.requires_grad_(freeze_QKV)
+        for layer, para_attn in enumerate(self.attn_seq):
+            for para, attn in enumerate(para_attn):
+                freeze_Q = not(freezer['freeze_Attn'][layer][para]['freeze_Q'])
+                freeze_K = not(freezer['freeze_Attn'][layer][para]['freeze_K'])
+                freeze_V = not(freezer['freeze_Attn'][layer][para]['freeze_V'])
+                freeze_O = not(freezer['freeze_Attn'][layer][para]['freeze_O'])
+                attn.q_proj_weight.requires_grad_(freeze_Q)
+                attn.k_proj_weight.requires_grad_(freeze_K)
+                attn.v_proj_weight.requires_grad_(freeze_V)
                 attn.out_proj.requires_grad_(freeze_O)
 
+        freeze_U = not(freezer['freeze_U'])
         self.unemb.requires_grad_(freeze_U)
 
 
-    def forward(self, x: t.Tensor, out_computation=False) -> Tuple[t.Tensor, Dict[str, t.Tensor]]:
+    def forward(self, x: t.Tensor, out_computation: bool=False, continuous: bool=False) -> Tuple[t.Tensor, Dict[str, t.Tensor]]:
         """
         Computes the forward pass of the Transformer.
         Depending on the skips, some operations can be skipped.
@@ -119,31 +148,41 @@ class Transformer(t.nn.Module):
         skip_pos_OV = 0 if skips['skip_pos_OV'] else 1
         skip_emb_OV = 0 if skips['skip_emb_OV'] else 1
 
-        res = self.word_emb.weight[x]
+        if self.argmax_mode:
+            Lambda = 1000
+        else:
+            Lambda = 1
+
+
+        if continuous:
+            res = x
+        else:
+            res = self.word_emb.weight[x]
         pos = self.pos_emb.weight[:seq_len].unsqueeze(0)
         if out_computation:
             computation[f'res_{0}'] = res
             computation[f'pos'] = pos
 
-        for i, (para_attn, mlp) in enumerate(zip(self.attn_seq, self.mlp_seq)):
+        for layer, (para_attn, mlp) in enumerate(zip(self.attn_seq, self.mlp_seq)):
             norm_res = layer_norm(res) #we add the positional embedding at each layer to make it more efficient
             para_res = t.zeros_like(res)
 
-            for j, attn in enumerate(para_attn): #if there is parallel attention, each mechanism is computed in parallel and then added in the stream
-                attn_j, _ = attn(
-                    norm_res*skip_emb_QK+pos*skip_pos_QK, 
-                    norm_res*skip_emb_QK+pos*skip_pos_QK, 
-                    norm_res*skip_emb_OV+pos*skip_pos_OV, 
-                    attn_mask=attn_mask
-                )
+            for para, attn in enumerate(para_attn): #if there is parallel attention, each mechanism is computed in parallel and then added in the stream
+                if not skips['skip_attn'][layer][para]:
+                    attn_j, _ = attn(
+                        (norm_res*skip_emb_QK+pos*skip_pos_QK)*Lambda, 
+                        (norm_res*skip_emb_QK+pos*skip_pos_QK)*Lambda, 
+                        norm_res*skip_emb_OV+pos*skip_pos_OV, 
+                        attn_mask=attn_mask
+                    )
 
-                para_res += attn_j
-                if out_computation:
-                    computation[f'para_{j}_layer_{i}'] = attn_j
+                    para_res += attn_j
+                    if out_computation:
+                        computation[f'para_{para}_layer_{layer}'] = attn_j
 
             res = para_res + res*skip_res_connection
             if out_computation:
-                computation[f'res_after_attn_layer_{i}'] = res
+                computation[f'res_after_attn_layer_{layer}'] = res
                 
             norm_res = layer_norm(res)
             if self.use_mlp:
@@ -152,8 +191,8 @@ class Transformer(t.nn.Module):
                 mlp_out = t.zeros_like(norm_res)
             res = mlp_out + res
             if out_computation:
-                computation[f'mlp_{i}'] = mlp_out
-                computation[f'res_after_mlp_layer_{i}'] = res
+                computation[f'mlp_{layer}'] = mlp_out
+                computation[f'res_after_mlp_layer_{layer}'] = res
             
         logits: t.Tensor = self.unemb(res) #no layer-norm at the end, we want modular temperature
         logits = logits - logits.mean()
@@ -183,21 +222,22 @@ class Low_rank(t.nn.Module):
         self.pi: List[t.Tensor] = pi
 
 
+    def low_init(self, scale: float=1) -> None:
+        self.word_emb.weight = t.nn.Parameter(t.randn_like(self.word_emb.weight)*scale/(np.sqrt(self.word_emb.weight.shape[0]*self.word_emb.weight.shape[1])))
+        self.unemb.weight = t.nn.Parameter(t.randn_like(self.unemb.weight)*scale/(np.sqrt(self.unemb.weight.shape[0]*self.unemb.weight.shape[1])))
+
+
     def compute_div(self):
         """
         Compute the closed-form divergence.
         """
-        with t.no_grad():
-            W_E = self.word_emb.weight.detach()
-            W_U = self.unemb.weight.detach()
-            f = W_E@W_U.mH 
-            L = t.log(self.pi[2].flatten(0, 1))
-            PI = self.pi[2].flatten(0, 1)
-            Z = f - L - ((f-L)*PI).sum(-1, keepdim=True)
-            return t.log((t.exp(Z)*PI).sum(-1)).mean()
+        W_E = self.word_emb.weight.detach()
+        W_U = self.unemb.weight.detach()
+        pi = self.pi
+        return compute_div(W_E, W_U, pi)
 
 
-    def freeze(self, freezer: Dict[str, bool]) -> None:
+    def freeze(self, freezer) -> None:
         """
         Freezes the training of the embedding and/or unembedding.
         """

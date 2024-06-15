@@ -1,5 +1,6 @@
 import torch as t
-from typing import List, Tuple
+import numpy as np
+from typing import List, Tuple, Any
 from torch.utils.data import DataLoader, TensorDataset
 
 def layer_norm(x: t.Tensor, eps=1e-10) -> t.Tensor:
@@ -7,6 +8,15 @@ def layer_norm(x: t.Tensor, eps=1e-10) -> t.Tensor:
     mean_x = x.mean(dim=-1, keepdim=True)
     var_x = ((x-mean_x)**2).mean(dim=-1, keepdim=True)
     return (x-mean_x)/(t.sqrt(var_x)+eps)
+
+
+def compute_div(W_E: t.Tensor, W_U: t.Tensor, pi: List[t.Tensor]):
+    with t.no_grad():
+            f = t.log(t.softmax(W_E@W_U.mH, dim=-1))
+            PI = t.transpose(pi[2], 0, 1).flatten(0, 1) #be carefull to transpose !!! first dim is +N
+            L = t.log(PI)
+            prior = (pi[0].unsqueeze(-1)*pi[1]).flatten(0, 1)
+            return ((PI*(L-f)).sum(-1)*prior).sum()
 
 
 def generate_data(batch_size: int, num_batch: int, pi: List[t.Tensor], context_window: int) -> DataLoader:
@@ -66,8 +76,36 @@ def generate_each(pi: List[t.Tensor], eps: float = 1e-10) -> t.Tensor:
     return t.tensor(tokens, dtype=t.long)
 
 
+def generate_uniform_simplex(nb_points, add_special=True) -> List[Tuple[Any, Any, Any]]:
+    """
+    Generates nb_points uniformly on the 2-simplex. 
+    Add extra points at the tip and center of the simplex if 'add_special=True.'
+    """
+
+    U, V = list(np.random.rand(nb_points)), list(np.random.rand(nb_points))
+    if add_special:
+        U += [0, 1, 1, 4/9]
+        V += [0, 0, 1, 1/2]
+
+    data=[]
+    for u, v in zip(U, V):
+        sqrt_u = np.sqrt(u)
+        p, q, r = 1-sqrt_u, sqrt_u*(1-v), sqrt_u*v
+        data.append((p, q, r))
+    
+    return data
+
+
+def generate_uniform_sphere(nb_points) -> List[Tuple[Any, Any, Any]]:
+    """Generates nb_points uniformly on the sphere."""
+    data_tensor = t.randn((3, nb_points))
+    data_tensor = data_tensor/t.norm(data_tensor, dim=0, keepdim=True)
+    data = np.array(data_tensor).tolist()
+    return data
+
+
 def entropy(pi: List[t.Tensor], eps=1e-10) -> t.Tensor:
-    "Computes the entropy of a weighted batch of distributions."
+    """Computes the entropy of a weighted batch of distributions."""
     ent = -t.log(pi[-1]+eps)
     for j in range(len(pi)-1, 0-1, -1):
         ent = (pi[j]*ent).sum(-1)
@@ -94,7 +132,7 @@ def first_position_law(nb_tokens: List[int], N: int, d: int, feature_importance=
     """
     pi=[]
     for i, nb_token in enumerate(nb_tokens):
-        dist = t.Tensor([1 for i in range(N)])
+        dist = t.Tensor([1/N for i in range(N)])
         dist[nb_token:] = 0
         dist = dist/dist.sum()
         pi.append(t.cat([dist[t.randperm(N)] for _ in range(N**i)], dim=0).reshape((N,)*(i+1)))
@@ -118,7 +156,7 @@ def last_position_law(nb_tokens: List[int], N: int, k: int, p:float) -> List[t.T
 
     pi=[]
     for i, nb_token in enumerate(nb_tokens):
-        dist = t.Tensor([1 for i in range(N)])
+        dist = t.Tensor([1/N for i in range(N)])
         dist[nb_token:] = 0
         dist = dist/dist.sum()
         pi.append(t.cat([dist[t.randperm(N)] for _ in range(N**i)], dim=0).reshape((N,)*(i+1)))
@@ -143,7 +181,7 @@ def gen_d_law(nb_tokens: List[int], N: int, d: int, axis_aligned=False, feature_
 
     pi=[]
     for i, nb_token in enumerate(nb_tokens):
-        dist = t.Tensor([1 for _ in range(N)])
+        dist = t.Tensor([1/N for _ in range(N)])
         dist[nb_token:] = 0
         dist = dist/dist.sum()
         pi.append(t.cat([dist[t.randperm(N)] for _ in range(N**i)], dim=0).reshape((N,)*(i+1)))
@@ -172,7 +210,7 @@ def almost_rank_d(nb_tokens: List[int], N: int, d: int, axis_aligned=False, eig_
 
     pi=[]
     for i, nb_token in enumerate(nb_tokens):
-        dist = t.Tensor([1 for _ in range(N)])
+        dist = t.Tensor([1/N for _ in range(N)])
         dist[nb_token:] = 0
         dist = dist/dist.sum()
         pi.append(t.cat([dist[t.randperm(N)] for _ in range(N**i)], dim=0).reshape((N,)*(i+1)))
@@ -191,8 +229,18 @@ def almost_rank_d(nb_tokens: List[int], N: int, d: int, axis_aligned=False, eig_
 #Heatmap display
 
 import seaborn as sns
+import matplotlib.pyplot as plt
 import ipywidgets as widgets 
 from IPython.display import display, clear_output
+
+def plot_heatmap(map: t.Tensor, title: str, xticklabels=None, yticklabels=None):
+    if xticklabels == None and yticklabels == None:
+        sns.heatmap(map, center=0, cmap='bwr')
+    else:
+        sns.heatmap(map, center=0, cmap='bwr', xticklabels=xticklabels, yticklabels=yticklabels)
+    plt.title(title)
+    plt.show()
+
 
 def display_heatmaps(heatmap_list):
     num_heatmaps = len(heatmap_list)
