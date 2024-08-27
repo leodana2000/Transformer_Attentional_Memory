@@ -64,7 +64,7 @@ class Test_generate_data(unittest.TestCase):
 
         pi = power_unif_law(alphas, nb_tokens, N)
         context_window = len(pi)
-        #generate_data(1, 1, pi, context_window)
+        generate_data(1, 1, pi, context_window)
         generate_data(2, 1, pi, context_window)
         generate_data(1, 2, pi, context_window)
         generate_data(2, 2, pi, context_window)

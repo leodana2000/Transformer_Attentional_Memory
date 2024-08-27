@@ -23,8 +23,6 @@ def generate_data(batch_size: int, num_batch: int, pi: List[t.Tensor], context_w
     Generate data using a k-states markov chain given by the distribution pi.
     Each token i for i<n_gram is given by pi[i][previous_tokens],
     Each token i for i>=n_gram is given by pi[n_gram-1][n_gram_previous_tokens].
-
-    If one_extra = True: computes on extra token, representing the next_token of the last example in the sentences.
     """
 
     n_gram = len(pi)
@@ -33,11 +31,17 @@ def generate_data(batch_size: int, num_batch: int, pi: List[t.Tensor], context_w
     token_list: List[t.Tensor] = []
     for i in range(n_gram):
         if i == 0:
-            token = t.multinomial(pi[0], batch_size*num_batch, replacement=True).unsqueeze(1) #size: [batch_size*num_batch, 1]
+            if batch_size*num_batch == 1:
+                token = t.multinomial(pi[0], 1).unsqueeze(1)
+            else:
+                token = t.multinomial(pi[0], batch_size*num_batch, replacement=True).unsqueeze(1) #size: [batch_size*num_batch, 1]
             token_list.append(token) #size: [[1, batch_size*num_batch]]
 
         elif i == 1:
-            token = t.multinomial(pi[i][token_list[0].squeeze()], 1) #size: [batch_size*num_batch, 1]
+            if batch_size*num_batch == 1:
+                token = t.multinomial(pi[i][token_list[0].squeeze()], 1).unsqueeze(0)
+            else:
+                token = t.multinomial(pi[i][token_list[0].squeeze()], 1) #size: [batch_size*num_batch, 1]
             token_list.append(token) #size: [[1, batch_size*num_batch], [1, batch_size*num_batch]]
 
         elif i < n_gram-1:
