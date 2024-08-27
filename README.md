@@ -5,3 +5,5 @@ The goal of the project is to study the memorization capabilities of Toy model T
 See the report XXX, for more details on the project.
 
 You can test each module by running *tests.py*, and test how the code base works in *test_notebook.ipynb*.
+
+The main notebook is *experiments.ipynb* and gathers all experiments, the results' of which are in the folder *Images*.
