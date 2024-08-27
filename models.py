@@ -96,15 +96,14 @@ class Transformer(t.nn.Module):
                 compressed_res = self.linear_compress(res)
             else:
                 compressed_res = res
-            #norm_res = layer_norm(compressed_res)
             para_res = t.zeros_like(compressed_res)
             
             # Each attention mechanism is computed in parallel and then added in the stream.
             for attn in para_attn: 
                 attn_j, _ = attn(
-                    (norm_res+pos), 
-                    (norm_res+pos), 
-                    norm_res+pos, 
+                    (compressed_res+pos), 
+                    (compressed_res+pos), 
+                    compressed_res+pos, 
                     attn_mask=attn_mask
                 )
                 para_res += attn_j

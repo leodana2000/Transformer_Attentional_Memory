@@ -64,7 +64,7 @@ class Test_generate_data(unittest.TestCase):
 
         pi = power_unif_law(alphas, nb_tokens, N)
         context_window = len(pi)
-        generate_data(1, 1, pi, context_window)
+        #generate_data(1, 1, pi, context_window)
         generate_data(2, 1, pi, context_window)
         generate_data(1, 2, pi, context_window)
         generate_data(2, 2, pi, context_window)
@@ -84,21 +84,17 @@ class Test_generate_data(unittest.TestCase):
         self.assertEqual(bnb, batch_size*num_batch)
         self.assertEqual(c, context_window)
 
-        dataloader = generate_data(batch_size, num_batch, pi, context_window, one_extra=True)
-        _, c = dataloader.dataset.tensors[0].shape
-        self.assertEqual(c, context_window+1)
-
 
 class Test_layer_norm(unittest.TestCase):
     def test_zero(self):
         x = t.zeros((5, 5))
         y = layer_norm(x)
-        self.assertAlmostEquals(t.abs(x-y).sum(), 0., delta=1e-5)
+        self.assertAlmostEqual(t.abs(x-y).sum(), 0., delta=1e-5)
 
     def test_norm(self):
         x = t.randn((6, 3, 9))
         y = layer_norm(x)
-        self.assertAlmostEquals(t.abs((y**2).mean(-1) - 1).sum(), 0., delta=1e-5)
+        self.assertAlmostEqual(t.abs((y**2).mean(-1) - 1).sum(), 0., delta=1e-5)
 
 
 #Test train

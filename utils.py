@@ -33,17 +33,39 @@ def generate_data(batch_size: int, num_batch: int, pi: List[t.Tensor], context_w
     token_list: List[t.Tensor] = []
     for i in range(n_gram):
         if i == 0:
-            token = t.multinomial(pi[0], batch_size*num_batch, replacement=True).squeeze()
-            token_list.append(token)
+            token = t.multinomial(pi[0], batch_size*num_batch, replacement=True).unsqueeze(1) #size: [batch_size*num_batch, 1]
+            token_list.append(token) #size: [[1, batch_size*num_batch]]
+
+        elif i == 1:
+            token = t.multinomial(pi[i][token_list[0].squeeze()], 1) #size: [batch_size*num_batch, 1]
+            token_list.append(token) #size: [[1, batch_size*num_batch], [1, batch_size*num_batch]]
+
         elif i < n_gram-1:
-            token = t.multinomial(pi[i][*token_list, :], 1).squeeze()
+            token_tensor = t.cat(token_list, dim=1) #size: [batch_size*num_batch, i]
+            cond_pi_list = []
+            for token_l in token_tensor:
+                py = pi[i] #size: [N]*(i+1)
+                for tok in token_l: #size: i
+                    py = py[tok].squeeze()
+                cond_pi_list.append(py.unsqueeze(0))
+            cond_pi = t.cat(cond_pi_list, dim=0) #size: [i, N]
+            token = t.multinomial(cond_pi, 1) #size: [i, 1]
             token_list.append(token)
+
         elif i == n_gram-1:
             for _ in range(context_window-n_gram+1):
-                token = t.multinomial(pi[n_gram-1][*token_list[-n_gram+1:], :], 1).squeeze()
+                token_tensor = t.cat(token_list[-n_gram+1:], dim=1) #size: [batch_size*num_batch, n_gram-1]
+                cond_pi_list = []
+                for token_l in token_tensor:
+                    py = pi[i]
+                    for tok in token_l:
+                        py = py[tok].squeeze()
+                    cond_pi_list.append(py.unsqueeze(0))
+                cond_pi = t.cat(cond_pi_list, dim=0) #size: [i, N]
+                token = t.multinomial(cond_pi, 1) #size: [i, 1]
                 token_list.append(token)
     
-    token_list = [token.unsqueeze(-1) for token in token_list]
+    token_list = [token.squeeze().unsqueeze(-1) for token in token_list]
     tokens = t.cat(token_list, dim=-1)
     dataset = TensorDataset(tokens)
 
