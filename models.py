@@ -1,9 +1,6 @@
 import torch as t
-import numpy as np
-from typing import Dict, List, Tuple
-from utils import layer_norm, compute_div
-
-device = 'cpu'
+from typing import Dict, List
+from utils import layer_norm
 
 class Transformer(t.nn.Module):
     """Transformer architecture with parallel attention heads and MLPs, additive positional embeddings, and layer-norm."""
@@ -11,7 +8,7 @@ class Transformer(t.nn.Module):
     def __init__(
             self, d: int, N: int, nb_layers: int, width: int, depth: int, 
             parallel_heads: int, d_head: int, nb_head: int, context_window: int, 
-            pi: List[t.Tensor],
+            pi: List[t.Tensor], device: str = 'cpu',
             ) -> None:
         """
         Parameters.
@@ -42,6 +39,7 @@ class Transformer(t.nn.Module):
         }
         
         self.pi: List[t.Tensor] = pi
+        self.device: str = device
 
         super().__init__()
 
@@ -86,7 +84,7 @@ class Transformer(t.nn.Module):
         context_window = self.meta_params['context_window']
         assert seq_len <= context_window
 
-        attn_mask = (t.tril(t.ones((seq_len, seq_len))) == 0).to(device)
+        attn_mask = (t.tril(t.ones((seq_len, seq_len))) == 0).to(self.device)
 
         res = self.word_emb.weight[x]
         pos = self.pos_emb.weight[:seq_len].unsqueeze(0)
@@ -133,7 +131,7 @@ class AoT(Transformer):
 
 
 class Low_rank(t.nn.Module):
-    def __init__(self, d: int, N: int, context_window: int, pi: List[t.Tensor]) -> None:
+    def __init__(self, d: int, N: int, context_window: int, pi: List[t.Tensor], device: str = 'cpu') -> None:
         super().__init__()
         n_gram = len(pi)
         self.word_emb = t.nn.Linear(d, N**(n_gram-1), bias=False)
@@ -152,12 +150,13 @@ class Low_rank(t.nn.Module):
             'n_gram': n_gram,
         }
         self.pi: List[t.Tensor] = pi
+        self.device: str = device
 
     def forward(self, x: t.Tensor) -> t.Tensor: #works for trigram only
         x = x[:, :-1] + x[:, 1:]*self.meta_params['N']
 
         #concatenates anything in first position since we don't care about i-th prediction for i < n-gram - 1
-        x = t.cat([t.zeros(x.shape[0], 1).to(t.int).to(device), x], dim=1) 
+        x = t.cat([t.zeros(x.shape[0], 1).to(t.int).to(self.device), x], dim=1) 
 
         logits = self.unemb(self.word_emb.weight[x])
         logits = logits - logits.mean()

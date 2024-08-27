@@ -5,9 +5,6 @@ from torch.utils.data import DataLoader
 from utils import entropy
 from models import Transformer, Low_rank
 
-
-device = 'cpu'
-
 ##Weird bug: type problem if we move the model_proba and pred_proba operation into the train function ...
 
 def compute_loss(model: Union[Transformer, Low_rank], model_logits: t.Tensor, batch: t.Tensor, ent: t.Tensor, loss_fn, next_token: bool) -> t.Tensor:
@@ -49,16 +46,15 @@ def train(model: Union[Transformer, Low_rank], dataloader: DataLoader, lr: float
     """
     
     t.manual_seed(seed)
-    model.to(device)
     optimizer = t.optim.Adam(model.parameters(), lr=lr)
 
-    ent = entropy(model.pi).to(device)
+    ent = entropy(model.pi).to(model.device)
     loss_fn = t.nn.CrossEntropyLoss()
 
     Loss = []
     Acc = []
     for batch in tqdm(dataloader):
-        batch = batch[0].to(device)
+        batch = batch[0].to(model.device)
         model_logits = model(batch[:, :-1])
         loss = compute_loss(model, model_logits, batch, ent, loss_fn, next_token)
         acc = compute_acc(model, model_logits, batch)
@@ -68,6 +64,8 @@ def train(model: Union[Transformer, Low_rank], dataloader: DataLoader, lr: float
         
         Loss.append(loss.item())
         Acc.append(acc.item())
+        
+        batch.to('cpu')
     model.to('cpu')
     
     return {'Loss': Loss, 'Acc': Acc}
