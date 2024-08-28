@@ -40,12 +40,11 @@ def compute_acc(model: Union[Transformer, Low_rank], model_logits: t.Tensor, bat
     return acc
 
 
-def train(model: Union[Transformer, Low_rank], dataloader: DataLoader, lr: float=1e-3, next_token: bool=True, seed: int=0) -> Dict[str, List[float]]:
+def train(model: Union[Transformer, Low_rank], dataloader: DataLoader, epochs: int, lr: float=1e-3, next_token: bool=True) -> Dict[str, List[float]]:
     """
     Trains the model and return the loss and accuracy over all batches.
     """
     
-    t.manual_seed(seed)
     optimizer = t.optim.Adam(model.parameters(), lr=lr)
 
     ent = entropy(model.pi).to(model.device)
@@ -53,19 +52,17 @@ def train(model: Union[Transformer, Low_rank], dataloader: DataLoader, lr: float
 
     Loss = []
     Acc = []
-    for batch in tqdm(dataloader):
-        batch = batch[0].to(model.device)
-        model_logits = model(batch[:, :-1])
-        loss = compute_loss(model, model_logits, batch, ent, loss_fn, next_token)
-        acc = compute_acc(model, model_logits, batch)
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
+    for _ in tqdm(range(epochs)):
+        for batch in dataloader:
+            batch = batch[0].to(model.device)
+            model_logits = model(batch[:, :-1])
+            loss = compute_loss(model, model_logits, batch, ent, loss_fn, next_token)
+            acc = compute_acc(model, model_logits, batch)
+            loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
         
-        Loss.append(loss.item())
-        Acc.append(acc.item())
-        
-        batch.to('cpu')
-    model.to('cpu')
+            Loss.append(loss.item())
+            Acc.append(acc.item())
     
     return {'Loss': Loss, 'Acc': Acc}

@@ -2,12 +2,6 @@ import torch as t
 from typing import List
 from torch.utils.data import DataLoader, TensorDataset
 
-def layer_norm(x: t.Tensor, eps=1e-10) -> t.Tensor:
-    """We norm x along the last dimension."""
-    mean_x = x.mean(dim=-1, keepdim=True)
-    var_x = ((x-mean_x)**2).mean(dim=-1, keepdim=True)
-    return (x-mean_x)/(t.sqrt(var_x)+eps)
-
 
 def compute_div(W_E: t.Tensor, W_U: t.Tensor, pi: List[t.Tensor]):
     with t.no_grad():
@@ -18,7 +12,7 @@ def compute_div(W_E: t.Tensor, W_U: t.Tensor, pi: List[t.Tensor]):
             return ((PI*(L-f)).sum(-1)*prior).sum()
 
 
-def generate_data(batch_size: int, num_batch: int, pi: List[t.Tensor], context_window: int) -> DataLoader:
+def generate_data(batch_size: int, num_batch: int, pi: List[t.Tensor], context_window: int, device: str='cpu') -> DataLoader:
     """
     Generate data using a k-states markov chain given by the distribution pi.
     Each token i for i<n_gram is given by pi[i][previous_tokens],
@@ -77,6 +71,8 @@ def generate_data(batch_size: int, num_batch: int, pi: List[t.Tensor], context_w
         dataset,
         batch_size=batch_size,
         shuffle=True,
+        pin_memory=(device=='cuda'),
+        num_workers= 2 if (device=='cuda') else 1,
     )
     return dataloader
 
