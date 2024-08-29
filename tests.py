@@ -8,7 +8,7 @@ import torch as t
 import numpy as np
 
 #Tests for utils
-from utils import power_unif_law, entropy, generate_data, layer_norm
+from utils import power_unif_law, entropy, generate_data
 
 class Test_power_unif_law(unittest.TestCase):
     def test_has_zeros(self):
@@ -83,18 +83,6 @@ class Test_generate_data(unittest.TestCase):
         bnb, c = dataloader.dataset.tensors[0].shape
         self.assertEqual(bnb, batch_size*num_batch)
         self.assertEqual(c, context_window)
-
-
-class Test_layer_norm(unittest.TestCase):
-    def test_zero(self):
-        x = t.zeros((5, 5))
-        y = layer_norm(x)
-        self.assertAlmostEqual(t.abs(x-y).sum(), 0., delta=1e-5)
-
-    def test_norm(self):
-        x = t.randn((6, 3, 9))
-        y = layer_norm(x)
-        self.assertAlmostEqual(t.abs((y**2).mean(-1) - 1).sum(), 0., delta=1e-5)
 
 
 #Test train

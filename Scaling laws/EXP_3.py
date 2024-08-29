@@ -17,13 +17,10 @@ accuracy = data['acc'].to_list()
 N = data['N'].to_list()[0]
 d_head = data['d_head'].to_list()[0]
 H = data['para'].to_list()[0]
-data = pd.read_csv(f'Scaling laws/Data_exp_3_2.csv')
-accuracy += data['acc'].to_list()
-d_list += data['d'].to_list()
 
 # Compute the linear regression y=ax+b.
-y = sum(accuracy)/len(accuracy)
-x = sum(d_list)/len(d_list)
+y = np.mean(accuracy)
+x = np.mean(d_list)
 Y = np.array(accuracy) - y
 X = np.array(d_list) - x
 a = np.sum(Y*X)/np.sum(X*X)
@@ -32,14 +29,16 @@ Lin_reg = np.array(d_list)*a+b
 print(f"Linear regression. a: {a}, b: {b}.")
 
 # Compute the best Monomial y=cx**a.
-y = sum(np.log(accuracy))/len(accuracy)
-x = sum(np.log(d_list))/len(d_list)
+y = np.mean(np.log(accuracy))
+x = np.mean(np.log(d_list))
 Y = np.log(accuracy) - y
 X = np.log(d_list) - x
 a = np.sum(Y*X)/np.sum(X*X)
 b = y - a*x
 Mon_reg = np.exp(a*np.log(d_list)+b)
-print(f"Monomial regression. a:{a}, c:{np.exp(b)}")
+c = np.mean(accuracy) - np.mean(Mon_reg)
+Mon_reg = Mon_reg + c
+print(f"Monomial regression. a:{a}, c:{np.exp(b)}, d: {c}.")
 
 plt.plot(d_list, accuracy, label="AoT")
 plt.plot(d_list, [1/N for _ in range(len(d_list))], color='black', label="Random")

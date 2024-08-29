@@ -13,7 +13,7 @@ plot_all = True
 
 Scaling_coef = []
 for i in range(10+1):
-    data_1: pd.DataFrame = pd.read_csv(f'Scaling laws/exp_{i}.csv')
+    data_1: pd.DataFrame = pd.read_csv(f'Scaling laws/Data_exp_1_{i}.csv')
     para_list = data_1['para'].to_list()
     accuracy = data_1['acc'].to_list()
     N = data_1['N'].to_list()[0]
@@ -21,7 +21,7 @@ for i in range(10+1):
 
     # We filter out if the last points are constant at accuracy 1 to compute the linear scaling before it saturates.
     for i, acc in enumerate(accuracy):
-        if acc > 0.95:
+        if (acc > 0.95) or (i == len(accuracy)-1):
             linear_accuracy = accuracy[:i+1]
             para_list = para_list[:i+1]
             break
@@ -38,7 +38,7 @@ for i in range(10+1):
 
     # We plot the linear regression
     if plot_all:
-        plt.plot(para_list, accuracy, label="AoT")
+        plt.plot(para_list, linear_accuracy, label="AoT")
         plt.plot(para_list, [1/N for _ in range(len(para_list))], color='black', label="Random")
         plt.plot(para_list, [(1-1/N)*para*d/(N**2)+1/N for para in para_list], label="Our lower bound")
         plt.plot(para_list, [(1-1/N)*(para*(d-1)+1)/(N**2)+1/N for para in para_list], label="Previous lower bound")
