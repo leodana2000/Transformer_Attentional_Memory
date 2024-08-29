@@ -35,7 +35,7 @@ Y = np.log(accuracy) - y
 X = np.log(d_list) - x
 a = np.sum(Y*X)/np.sum(X*X)
 b = y - a*x
-Mon_reg = np.exp(a*np.log(d_list)+b)
+Mon_reg = np.exp(a*np.log(np.array(d_list))+b)
 c = np.mean(accuracy) - np.mean(Mon_reg)
 Mon_reg = Mon_reg + c
 print(f"Monomial regression. a:{a}, c:{np.exp(b)}, d: {c}.")
@@ -44,7 +44,7 @@ plt.plot(d_list, accuracy, label="AoT")
 plt.plot(d_list, [1/N for _ in range(len(d_list))], color='black', label="Random")
 plt.plot(d_list, [(1-1/N)*H*d_head/(N**2)+1/N for d in d_list], label="Our lower bound")
 plt.plot(d_list, [(1-1/N)*(H*(d_head-1)+1)/(N**2)+1/N for d in d_list], label="Previous lower bound")
-plt.plot(d_list, Lin_reg, color= "C0")
+plt.plot(d_list, Lin_reg, label="Linear approx")
 plt.plot(d_list, Mon_reg, label="Monomial approx")
 plt.xlabel("Head dimension")
 plt.ylabel("Accuracy")

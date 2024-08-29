@@ -1,11 +1,11 @@
 import torch as t
-from typing import Dict, List
+from typing import List
 
 class Transformer(t.nn.Module):
     """Transformer architecture with parallel attention heads and MLPs, additive positional embeddings, and layer-norm."""
    
     def __init__(
-            self, d: int, N: int, nb_layers: int, width: int, depth: int, 
+            self, d: int, N: int, nb_layers: int, width: int, 
             parallel_heads: int, d_head: int, nb_head: int, context_window: int, 
             pi: List[t.Tensor], device: str = 'cpu',
             ) -> None:
@@ -23,12 +23,11 @@ class Transformer(t.nn.Module):
         """
 
         assert d_head%nb_head == 0
-        self.use_mlp: bool = nb_layers*depth*width > 0 
+        self.use_mlp: bool = nb_layers*width > 0 
         self.d: int = d
         self.N: int = N
         self.nb_layers: int = nb_layers
         self.width: int = width
-        self.depth: int = depth
         self.para: int = parallel_heads
         self.d_head: int = d_head
         self.nb_head: int = nb_head
@@ -59,7 +58,9 @@ class Transformer(t.nn.Module):
         if self.use_mlp:
             self.mlp_seq = t.nn.Sequential(
                 *[t.nn.Sequential(
-                    *([t.nn.Linear(d, width, bias=True)] + [t.nn.GELU() if i%2 == 0 else t.nn.Linear(width, width, bias=True) for i in range(2*(depth-1)+1)] + [t.nn.Linear(width, d, bias=False)])
+                    t.nn.Linear(d, width, bias=True), 
+                    t.nn.GELU(), 
+                    t.nn.Linear(width, d, bias=False),
                 ) for _ in range(nb_layers)]
             )
         else:
@@ -95,7 +96,7 @@ class Transformer(t.nn.Module):
 
 class AoT(Transformer):
     def __init__(self, d: int, N: int, nb_layers: int, parallel_heads: int, d_head: int, nb_head: int, context_window: int, pi: List[t.Tensor], device: str='cpu') -> None:
-        super().__init__(d, N, nb_layers, 0, 0, parallel_heads, d_head, nb_head, context_window, pi, device=device)
+        super().__init__(d, N, nb_layers, 0, parallel_heads, d_head, nb_head, context_window, pi, device=device)
 
 
 class Low_rank(t.nn.Module):
@@ -105,7 +106,6 @@ class Low_rank(t.nn.Module):
         self.N: int = N
         self.nb_layers: int = 0
         self.width: int = 0
-        self.depth: int = 0
         self.para: int = 0
         self.d_head: int = 0
         self.nb_head: int = 0
@@ -118,7 +118,7 @@ class Low_rank(t.nn.Module):
         self.word_emb = t.nn.Linear(d, N**(self.n_gram-1), bias=False)
         self.unemb = t.nn.Linear(d, N, bias=False)
 
-    def forward(self, x: t.Tensor) -> t.Tensor: #works for trigram only
+    def forward(self, x: t.Tensor) -> t.Tensor:
         x = x[:, :-1] + x[:, 1:]*self.N
 
         #concatenates anything in first position since we don't care about i-th prediction for i < n-gram - 1

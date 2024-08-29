@@ -85,14 +85,68 @@ class Test_generate_data(unittest.TestCase):
         self.assertEqual(c, context_window)
 
 
-#Test train
-#TODO
-
-#Test interp
-#TODO
-
 #Test models
-#TODO
+from models import Transformer, Low_rank
+
+class test_init_models(unittest.TestCase):
+    def init_Transformer(self):
+        d=10
+        N=10
+        nb_layers=2
+        width=30
+        parallel_heads=7
+        d_head=12
+        nb_head=3
+        context_window=5
+        pi = power_unif_law([0.2, 0.5, 0.8], [6, 7, 10], N)
+        device='cpu'
+        model = Transformer(d, N, nb_layers, width, parallel_heads, d_head, nb_head, context_window, pi, device=device)
+
+        batch_size=10
+        num_batch=1
+        dataloader = generate_data(batch_size, num_batch, pi, context_window)
+        for batch in dataloader:
+            model(batch)
+
+    def init_low_rank(self):
+        d=10
+        N=10
+        context_window=5
+        pi = power_unif_law([0.2, 0.5, 0.8], [6, 7, 10], N)
+        device='cpu'
+        model = Low_rank(d, N, context_window, pi, device=device)
+
+        batch_size=10
+        num_batch=1
+        dataloader = generate_data(batch_size, num_batch, pi, context_window)
+        for batch in dataloader:
+            model(batch)
+
+
+# Test train
+from train import train
+
+class test_training(unittest.TestCase):
+    def test_training(self):
+        d=10
+        N=10
+        nb_layers=2
+        width=30
+        parallel_heads=7
+        d_head=12
+        nb_head=3
+        context_window=5
+        pi = power_unif_law([0.2, 0.5, 0.8], [6, 7, 10], N)
+        device='cpu'
+        model = Transformer(d, N, nb_layers, width, parallel_heads, d_head, nb_head, context_window, pi, device=device)
+
+        batch_size=100
+        num_batch=100
+        epochs=3
+        dataloader = generate_data(batch_size, num_batch, pi, context_window)
+        train(model, dataloader, epochs, next_token=True)
+        train(model, dataloader, epochs, next_token=False)
+
 
 if __name__ == '__main__':
     unittest.main()
