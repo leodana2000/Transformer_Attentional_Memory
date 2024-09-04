@@ -13,11 +13,11 @@ plot_all = True
 
 Scaling_coef = []
 for i in range(10+1):
-    data_1: pd.DataFrame = pd.read_csv(f'Scaling laws/Data_exp_1_{i}.csv')
-    para_list = data_1['para'].to_list()
-    accuracy = data_1['acc'].to_list()
-    N = data_1['N'].to_list()[0]
-    d = data_1['d'].to_list()[0]
+    data: pd.DataFrame = pd.read_csv(f'Scaling laws/Data_exp_1_{i}.csv')
+    para_list = data['para'].to_list()
+    accuracy = data['acc'].to_list()
+    N = data['N'].to_list()[0]
+    d = data['d'].to_list()[0]
 
     # We filter out if the last points are constant at accuracy 1 to compute the linear scaling before it saturates.
     for i, acc in enumerate(accuracy):
@@ -43,7 +43,7 @@ for i in range(10+1):
         plt.plot(para_list, [(1-1/N)*para*d/(N**2)+1/N for para in para_list], label="Our lower bound")
         plt.plot(para_list, [(1-1/N)*(para*(d-1)+1)/(N**2)+1/N for para in para_list], label="Previous lower bound")
         plt.plot(para_list, Z, color= "C0")
-        plt.xlabel("Head dimension")
+        plt.xlabel("Number of Heads")
         plt.ylabel("Accuracy")
         plt.title(f"Scaling law for N={N}, d=d_head={d}.")
         plt.legend()
@@ -79,13 +79,13 @@ Z = np.exp(a*log_d_list+b)
 plt.plot(d_list, Z, label="Cubic approx")
 print(f"Cubic regression. a:{a}, c:{np.exp(b)}")
 
-Y = log_Scaling_coef - y
+"""Y = log_Scaling_coef - y
 X = log_d_list - x
 a = np.sum(Y*X)/np.sum(X*X)
 b = y - a*x
 Z = np.exp(a*log_d_list+b)
 plt.plot(d_list, Z, label="Monomial approx")
-print(f"Monomial regression. a:{a}, c:{np.exp(b)}")
+print(f"Monomial regression. a:{a}, c:{np.exp(b)}")"""
 
 y = sum(log_Scaling_coef)/len(Scaling_coef)
 x = sum(d_list)/len(d_list)

@@ -18,35 +18,37 @@ N = data['N'].to_list()[0]
 d_head = data['d_head'].to_list()[0]
 H = data['para'].to_list()[0]
 
-# Compute the linear regression y=ax+b.
-y = np.mean(accuracy)
-x = np.mean(d_list)
-Y = np.array(accuracy) - y
-X = np.array(d_list) - x
+# Compute the linear regression y=ax+b for the first half.
+half_accuracy = accuracy[:6]
+half_d_list = d_list[:6]
+y = np.mean(half_accuracy)
+x = np.mean(half_d_list)
+Y = np.array(half_accuracy) - y
+X = np.array(half_d_list) - x
 a = np.sum(Y*X)/np.sum(X*X)
 b = y-a*x
-Lin_reg = np.array(d_list)*a+b
+Half_Lin_reg = np.array(half_d_list)*a+b
 print(f"Linear regression. a: {a}, b: {b}.")
 
-# Compute the best Monomial y=cx**a.
-y = np.mean(np.log(accuracy))
-x = np.mean(np.log(d_list))
-Y = np.log(accuracy) - y
-X = np.log(d_list) - x
+# Compute the linear regression y=ax+b for the second half.
+accuracy_half = accuracy[5:]
+d_list_half = d_list[5:]
+y = np.mean(accuracy_half)
+x = np.mean(d_list_half)
+Y = np.array(accuracy_half) - y
+X = np.array(d_list_half) - x
 a = np.sum(Y*X)/np.sum(X*X)
-b = y - a*x
-Mon_reg = np.exp(a*np.log(np.array(d_list))+b)
-c = np.mean(accuracy) - np.mean(Mon_reg)
-Mon_reg = Mon_reg + c
-print(f"Monomial regression. a:{a}, c:{np.exp(b)}, d: {c}.")
+b = y-a*x
+Lin_reg_Half = np.array(d_list_half)*a+b
+print(f"Linear regression. a: {a}, b: {b}.")
 
 plt.plot(d_list, accuracy, label="AoT")
 plt.plot(d_list, [1/N for _ in range(len(d_list))], color='black', label="Random")
 plt.plot(d_list, [(1-1/N)*H*d_head/(N**2)+1/N for d in d_list], label="Our lower bound")
 plt.plot(d_list, [(1-1/N)*(H*(d_head-1)+1)/(N**2)+1/N for d in d_list], label="Previous lower bound")
-plt.plot(d_list, Lin_reg, label="Linear approx")
-plt.plot(d_list, Mon_reg, label="Monomial approx")
-plt.xlabel("Head dimension")
+plt.plot(half_d_list, Half_Lin_reg, color="C0")
+plt.plot(d_list_half, Lin_reg_Half, color="C0")
+plt.xlabel("Embedding dimension")
 plt.ylabel("Accuracy")
 plt.title(f"Scaling law for N={N}, d_head={d_head}, H={H}.")
 plt.legend()
