@@ -19,19 +19,19 @@ d = data['d'].to_list()[0]
 H = data['para'].to_list()[0]
 
 # Compute the linear regression y=ax+b.
-y = sum(accuracy)/len(accuracy)
-x = sum(d_head_list)/len(d_head_list)
+y = sum(np.array(accuracy))/len(accuracy)
+x = sum(np.array(d_head_list)**2)/len(d_head_list)
 Y = np.array(accuracy) - y
-X = np.array(d_head_list) - x
+X = np.array(d_head_list)**2 - x
 a = np.sum(Y*X)/np.sum(X*X)
 b = y-a*x
-Lin_reg = np.array(d_head_list)*a+b
+Quad_reg = np.array(d_head_list)**2*a+b
 
 plt.plot(d_head_list, accuracy, label="AoT")
 plt.plot(d_head_list, [1/N for _ in range(len(d_head_list))], color='black', label="Random")
-plt.plot(d_head_list, [(1-1/N)*H*d_head/(N**2)+1/N for d_head in d_head_list], label="Our lower bound")
+plt.plot(d_head_list, [(1-1/N)*(H*d_head+d)/(N**2)+1/N for d_head in d_head_list], label="Our lower bound")
 plt.plot(d_head_list, [(1-1/N)*(H*(d_head-1)+1)/(N**2)+1/N for d_head in d_head_list], label="Previous lower bound")
-plt.plot(d_head_list, Lin_reg, color= "C0")
+plt.plot(d_head_list, Quad_reg, color= "C0", linestyle='--', label='Quadratic regression')
 plt.xlabel("Head dimension")
 plt.ylabel("Accuracy")
 plt.title(f"Scaling law for N={N}, d={d}, H={H}.")

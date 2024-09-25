@@ -14,7 +14,7 @@ plot_all = True
 Scaling_coef = []
 for i in range(10+1):
     data: pd.DataFrame = pd.read_csv(f'Scaling laws/Data_exp_1_{i}.csv')
-    para_list = data['para'].to_list()
+    H_list = data['para'].to_list()
     accuracy = data['acc'].to_list()
     N = data['N'].to_list()[0]
     d = data['d'].to_list()[0]
@@ -23,26 +23,26 @@ for i in range(10+1):
     for i, acc in enumerate(accuracy):
         if (acc > 0.95) or (i == len(accuracy)-1):
             linear_accuracy = accuracy[:i+1]
-            para_list = para_list[:i+1]
+            H_list = H_list[:i+1]
             break
 
     # We manually compute the linear regression.
     y = sum(linear_accuracy)/len(linear_accuracy)
-    x = sum(para_list)/len(para_list)
+    x = sum(H_list)/len(H_list)
     Y = np.array(linear_accuracy) - y
-    X = np.array(para_list) - x
+    X = np.array(H_list) - x
     a = np.sum(Y*X)/np.sum(X*X)
     Scaling_coef.append(a*(N**2))
     b = y-a*x
-    Z = np.array(para_list)*a+b
+    Z = np.array(H_list)*a+b
 
     # We plot the linear regression
     if plot_all:
-        plt.plot(para_list, linear_accuracy, label="AoT")
-        plt.plot(para_list, [1/N for _ in range(len(para_list))], color='black', label="Random")
-        plt.plot(para_list, [(1-1/N)*para*d/(N**2)+1/N for para in para_list], label="Our lower bound")
-        plt.plot(para_list, [(1-1/N)*(para*(d-1)+1)/(N**2)+1/N for para in para_list], label="Previous lower bound")
-        plt.plot(para_list, Z, color= "C0")
+        plt.plot(H_list, linear_accuracy, label="AoT")
+        plt.plot(H_list, [1/N for _ in range(len(H_list))], color='black', label="Random")
+        plt.plot(H_list, [(1-1/N)*(para*d+d)/(N**2)+1/N for para in H_list], label="Our lower bound")
+        plt.plot(H_list, [(1-1/N)*(para*(d-1)+1)/(N**2)+1/N for para in H_list], label="Previous lower bound")
+        plt.plot(H_list, Z, color= "C0", linestyle='--', label='Linear regression')
         plt.xlabel("Number of Heads")
         plt.ylabel("Accuracy")
         plt.title(f"Scaling law for N={N}, d=d_head={d}.")

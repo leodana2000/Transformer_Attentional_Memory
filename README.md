@@ -19,5 +19,4 @@ For the scaling in $d$, E3 suggests that it is linear by part, but the graph app
 
 In experiment 5, we measured the accuracy of a Transformer with only one attention head (to mix tokens) and an MLP with a varying size. This allowed us to compare the two architectures' accuracy for a given number or parameter. We found that both scalings are the same meaning that MLP and Attention layer can memorize equally well in practice (although this might depend on the optimization procedure).
 
-| ![Scaling MLP](./Images/Exp_5.png) | ![Scaling d](./Images/Exp_5_bis.png) |
-|-|-|
+![Scaling MLP](./Images/Exp_5.png)
