@@ -76,7 +76,7 @@ Y = np.array(accuracy) - y
 X = np.array(d_head_list)**2 - x
 a = np.sum(Y*X)/np.sum(X*X)
 b = y-a*x
-Quad_reg = np.array(d_head_list)**2*a+b
+Quad_reg = np.min(np.reshape(np.concatenate([np.array([1.]*len(d_head_list)), (np.array(d_head_list)**2*a+b)], axis=0), (2, len(d_head_list))), axis=0)
 
 plt.plot(d_head_list, accuracy, label="AoT")
 plt.plot(d_head_list, [1/N for _ in range(len(d_head_list))], color='black', label="Random")

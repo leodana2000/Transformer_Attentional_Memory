@@ -52,7 +52,7 @@ def train(model: Union[Transformer, Low_rank], dataloader: DataLoader, epochs: i
 
     Loss = []
     Acc = []
-    for _ in tqdm(range(epochs)):
+    for _ in range(epochs):
         for batch in dataloader:
             batch = batch[0].to(model.device)
             model_logits = model(batch[:, :-1])

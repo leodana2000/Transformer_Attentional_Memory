@@ -62,7 +62,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 
-data= pd.read_csv(f'Scaling laws/Data_exp_2_dim.csv')
+data = pd.read_csv(f'Scaling laws/Data_exp_2_dim.csv')
 d_head_list = data['d_head'].to_list()
 accuracy = data['acc'].to_list()
 N = data['N'].to_list()[0]
@@ -76,7 +76,7 @@ Y = np.array(accuracy) - y
 X = np.array(d_head_list)**2 - x
 a = np.sum(Y*X)/np.sum(X*X)
 b = y-a*x
-Quad_reg = np.array(d_head_list)**2*a+b
+Quad_reg = np.min(np.reshape(np.concatenate([np.array([1.]*len(d_head_list)), (np.array(d_head_list)**2*a+b)], axis=0), (2, len(d_head_list))), axis=0)
 
 plt.plot(d_head_list, accuracy, label="AoT")
 plt.plot(d_head_list, [1/N for _ in range(len(d_head_list))], color='black', label="Random")
