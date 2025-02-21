@@ -5,7 +5,7 @@ class Transformer(t.nn.Module):
     """Transformer architecture with parallel attention heads and MLPs, additive positional embeddings, and layer-norm."""
    
     def __init__(
-            self, d: int, N: int, nb_layers: int, width: int, 
+            self, d: int, N: int, nb_layers: int, width: int,
             parallel_heads: int, d_head: int, nb_head: int, context_window: int, 
             pi: List[t.Tensor], device: str = 'cpu',
             ) -> None:
@@ -14,12 +14,12 @@ class Transformer(t.nn.Module):
         d: embedding dimension,
         N: size of the vocabulary,
         width: width of the MLP,
-        depth: depth of the MLP,
+        depth: number of consecutive layers,
         nb_head: number of sub-heads in an attention module, it should divide d,
         nb_layers: number of layers in the Transformer,
         context_window: maximum length of a sequence of tokens, including the token to be predicted,
         pi: list of the conditional distribution for each tokens,
-        skips: dictionary of operations to skip in the forward pass,
+        device: the device on which to place the model,
         """
 
         assert d_head%nb_head == 0
@@ -79,12 +79,15 @@ class Transformer(t.nn.Module):
         res = self.word_emb.weight[x]
         pos = self.pos_emb.weight[:x.shape[1]].unsqueeze(0)
 
+        d=self.d
+        d_head=self.d_head
+
         for para_attn, mlp in zip(self.attn_seq, self.mlp_seq):
 
-            compressed_res = self.linear_compress(res) + pos
+            compressed_res = self.linear_compress(res) + pos if d!=d_head else res+pos
             para_res = sum(attn(compressed_res, compressed_res, compressed_res, attn_mask=self.attn_mask)[0] for attn in para_attn)
-            decompressed_res = self.linear_decompress(para_res)
-            res = decompressed_res.add_(res)
+            decompressed_res = self.linear_decompress(para_res) if d!=d_head else para_res
+            res = decompressed_res.add_(res) 
                 
             if self.use_mlp:
                 mlp_out = mlp(res)
