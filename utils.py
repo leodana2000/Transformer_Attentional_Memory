@@ -1,4 +1,5 @@
 import torch as t
+import numpy as np
 from typing import List
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -72,7 +73,7 @@ def generate_data(batch_size: int, num_batch: int, pi: List[t.Tensor], context_w
         batch_size=batch_size,
         shuffle=True,
         pin_memory=(device=='cuda'),
-        num_workers= 2 if (device=='cuda') else 1,
+        num_workers=0,
     )
     return dataloader
 
@@ -97,3 +98,12 @@ def power_unif_law(alphas: List[float], nb_tokens: List[int], N: int) -> List[t.
         dist = dist/dist.sum()
         pi.append(t.cat([dist[t.randperm(N)] for _ in range(N**i)], dim=0).reshape((N,)*(i+1)))
     return pi
+
+def reg_lin(X, Y):
+    """ Fits a linear regression. """
+    mean_X = np.mean(X)
+    mean_Y = np.mean(Y)
+
+    a = np.sum((X-mean_X)*(Y-mean_Y))/np.sum((X-mean_X)**2)
+    b = mean_Y - a*mean_X
+    return (a,b)

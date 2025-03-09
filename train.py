@@ -5,9 +5,8 @@ from torch.utils.data import DataLoader
 from utils import entropy
 from models import Transformer, Low_rank
 
-##Weird bug: type problem if we move the model_proba and pred_proba operation into the train function ...
-
-def compute_loss(model: Union[Transformer, Low_rank], model_logits: t.Tensor, batch: t.Tensor, ent: t.Tensor, loss_fn, next_token: bool) -> t.Tensor:
+def compute_loss(model: Union[Transformer, Low_rank], model_logits: t.Tensor, batch: t.Tensor, 
+                 ent: t.Tensor, loss_fn, next_token: bool) -> t.Tensor:
     """
     Computes the loss of the model on a batch, and adds the entropy for normalization.
     If next_token=True, the predictions are compared with the next token.
@@ -27,7 +26,7 @@ def compute_loss(model: Union[Transformer, Low_rank], model_logits: t.Tensor, ba
     return loss
 
 
-def compute_acc(model: Union[Transformer, Low_rank], model_logits: t.Tensor, batch: t.Tensor) -> t.Tensor:
+def compute_acc(model_logits: t.Tensor, batch: t.Tensor) -> t.Tensor:
     """
     Compute the accuracy of the model for predicting the correct token.
     Meaningfull only if the task is to learn a look-up table, low-entropy distribution.
@@ -40,29 +39,36 @@ def compute_acc(model: Union[Transformer, Low_rank], model_logits: t.Tensor, bat
     return acc
 
 
-def train(model: Union[Transformer, Low_rank], dataloader: DataLoader, epochs: int, lr: float=1e-3, next_token: bool=True) -> Dict[str, List[float]]:
+def train(model: Union[Transformer, Low_rank], dataloader: DataLoader, epochs: int, lr: float=1e-3, 
+          next_token: bool=True, verbose: bool=False, lr_low=None) -> Dict[str, List[float]]:
     """
     Trains the model and return the loss and accuracy over all batches.
     """
-    
+    model.to(model.device)
+    if lr_low == None:
+        lr_low = lr
+
     optimizer = t.optim.Adam(model.parameters(), lr=lr)
+    scheduler = t.optim.lr_scheduler.LinearLR(optimizer, start_factor=lr, end_factor=lr_low, total_iters=epochs)
 
     ent = entropy(model.pi).to(model.device)
     loss_fn = t.nn.CrossEntropyLoss()
 
     Loss = []
     Acc = []
-    for _ in range(epochs):
+    for _ in tqdm(range(epochs), leave=verbose):
         for batch in dataloader:
             batch = batch[0].to(model.device)
             model_logits = model(batch[:, :-1])
             loss = compute_loss(model, model_logits, batch, ent, loss_fn, next_token)
-            acc = compute_acc(model, model_logits, batch)
+            acc = compute_acc(model_logits, batch)
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
         
             Loss.append(loss.item())
             Acc.append(acc.item())
+            
+        scheduler.step()
     
     return {'Loss': Loss, 'Acc': Acc}
