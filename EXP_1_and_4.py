@@ -51,7 +51,7 @@ for i in range(3, 13+1):
         plt.legend(fontsize=13, loc="center right")
     plt.tight_layout()
     if d==10:
-        plt.savefig("Images/Exp_1.png", dpi=600)
+        plt.savefig("Images/Exp_1.png", dpi=400)
     plt.show()
 
 
@@ -86,5 +86,5 @@ plt.xticks(fontsize=14, ticks=xticks,  labels=xlabels)
 plt.yticks(fontsize=14)
 plt.legend(fontsize=15, loc="upper left")
 plt.tight_layout()
-plt.savefig("Images/Exp_4.png", dpi=600)
+plt.savefig("Images/Exp_4.png", dpi=400)
 plt.show()

@@ -45,7 +45,7 @@ for i in [40, 50, 60]:
     plt.legend(loc='upper left', fontsize=14)
     plt.tight_layout()
     if d==50:
-        plt.savefig("Images/Exp_1_dim.png", dpi=600)
+        plt.savefig("Images/Exp_1_dim.png", dpi=400)
     plt.show()
 
 """
@@ -84,7 +84,7 @@ plt.plot(d_head_list, [1/N for _ in range(len(d_head_list))], color='black', lab
 plt.plot(d_head_list, [(1-1/N)*(H*d_head+d)/(N**2)+1/N for d_head in d_head_list], label="Our lower bound")
 plt.plot(d_head_list, [(1-1/N)*(H*(d_head-1)+1)/(N**2)+1/N for d_head in d_head_list], label="Previous lower bound")
 #plt.plot(X_reg_1, Y_reg_1, color= "C0", linestyle='dashed', label='Linear regression')
-#plt.plot(X_reg_2, Y_reg_2, color= "C0", linestyle='dotted', label='Quadratic regression')
+plt.plot(X_reg_2, Y_reg_2, color= "C0", linestyle='dashed', label='Quadratic regression')
 plt.xlabel("Head dimension", fontsize=18)
 plt.ylabel("Accuracy", fontsize=18)
 plt.title(f"Scaling law for N={N}, d={d}, H={H}.", fontsize=18)
@@ -92,7 +92,7 @@ plt.xticks(fontsize=14)
 plt.yticks(fontsize=14)
 plt.legend(loc='upper left', fontsize=14)
 plt.tight_layout()
-plt.savefig("Images/Exp_2_dim.png", dpi=600)
+plt.savefig("Images/Exp_2_dim.png", dpi=400)
 plt.show()
 
 """
@@ -149,5 +149,5 @@ ax.legend(handles=legend_elements, fontsize=14)
 plt.xticks(fontsize=11.5)
 plt.yticks(fontsize=14)
 plt.tight_layout()
-plt.savefig("Images/Exp_5_dim.png", dpi=600)
+plt.savefig("Images/Exp_5_dim.png", dpi=400)
 plt.show()

@@ -45,7 +45,7 @@ for d in [7, 10, 13]:
     plt.legend(fontsize=13, loc="center right")
     plt.tight_layout()
     if d==10:
-        plt.savefig("Images/Exp_1_depth.png", dpi=600)
+        plt.savefig("Images/Exp_1_depth.png", dpi=400)
     plt.show()
 
 """
@@ -70,22 +70,16 @@ N = data['N'].to_list()[0]
 d = data['d'].to_list()[0]
 H = data['para'].to_list()[0]
 
-# Compute the linear regression y=ax+b.
-a, b = reg_lin(np.array(d_head_list), np.array(accuracy))
-X_reg_1 = np.linspace(d_head_list[0], d_head_list[-1], 10000)
-Y_reg_1 = X_reg_1*a+b
-
 # Compute the quadratic regression y=ax**2+b.
 a, b = reg_lin(np.array(d_head_list)**2, np.array(accuracy))
-X_reg_2 = np.linspace(d_head_list[0], d_head_list[-1], 10000)
-Y_reg_2 = X_reg_2**2*a+b
+X_reg = np.linspace(d_head_list[0], d_head_list[-1], 10000)
+Y_reg = X_reg**2*a+b
 
 plt.plot(d_head_list, accuracy, label="AoT")
 plt.plot(d_head_list, [1/N for _ in range(len(d_head_list))], color='black', label="Random")
 plt.plot(d_head_list, [(1-1/N)*(H*d_head+d)/(N**2)+1/N for d_head in d_head_list], label="Our lower bound")
 plt.plot(d_head_list, [(1-1/N)*(H*(d_head-1)+1)/(N**2)+1/N for d_head in d_head_list], label="Previous lower bound")
-#plt.plot(X_reg_1, Y_reg_1, color= "C0", linestyle='dashed', label='Linear regression')
-#plt.plot(X_reg_2, Y_reg_2, color= "C0", linestyle='dotted', label='Quadratic regression')
+plt.plot(X_reg, Y_reg, color= "C0", linestyle='dashed', label='Quadratic regression')
 plt.xlabel("Head dimension", fontsize=18)
 plt.ylabel("Accuracy", fontsize=18)
 plt.title(f"Scaling law for N={N}, d={d}, H={H}, 3 layers.", fontsize=18)
@@ -93,7 +87,7 @@ plt.xticks(fontsize=14)
 plt.yticks(fontsize=14)
 plt.legend(fontsize=15)
 plt.tight_layout()
-plt.savefig("Images/Exp_2_depth.png", dpi=600)
+plt.savefig("Images/Exp_2_depth.png", dpi=400)
 plt.show()
 
 """
@@ -151,5 +145,5 @@ ax.legend(handles=legend_elements, fontsize=15)
 plt.xticks(fontsize=14)
 plt.yticks(fontsize=14)
 plt.tight_layout()
-plt.savefig("Images/Exp_5_depth.png", dpi=600)
+plt.savefig("Images/Exp_5_depth.png", dpi=400)
 plt.show()
